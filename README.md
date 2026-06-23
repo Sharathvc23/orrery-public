@@ -71,19 +71,7 @@ specification you implement yourself.
 ### 💱 An agent economy
 - A skills marketplace and revenue tracking, with receipts as value-bearing assets
 
-### 📦 Install and own it
-- `docker compose up`; bring your own keys; bring your own backend (managed or
-  self-hosted Postgres); Apache-2.0
 
-## Quick start
-
-> Not runnable yet — this is the intended first-run experience.
-
-```bash
-git clone https://github.com/Sharathvc23/orrery-public
-cd orrery-public
-cp .env.example .env
-docker compose up          # org + agent + portal at http://localhost:8080
 ```
 
 ## Relationship to the `sm-*` primitives
