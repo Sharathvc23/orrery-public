@@ -72,8 +72,6 @@ specification you implement yourself.
 - A skills marketplace and revenue tracking, with receipts as value-bearing assets
 
 
-```
-
 ## Relationship to the `sm-*` primitives
 
 Orrery is the assembled product; the
