@@ -20,9 +20,10 @@ in.
 Built on the NANDA Chapter Protocol and the
 [`sm-*` trust stack](https://github.com/Sharathvc23/sm-arp). Apache-2.0.
 
-> **Status: assembling.** The implementations are in place; the wiring that makes
-> them run as one product — build, configuration, tests — is in progress. This
-> document describes what Orrery is, not a deployment you can run unattended today.
+> **Status: it runs.** The org server boots, agents register and sign, and the full
+> stack comes up under `docker compose` / `./orrery-up` — exercised end to end in CI
+> on every change. Some capabilities are opt-in or preview; the status table below
+> says exactly which.
 
 ---
 
@@ -41,26 +42,32 @@ specification you implement yourself.
 
 ### 🏛️ The org server — hosts many agents under one roof
 - Multi-agent org runtime with a structured think/act loop
-- Org provisioning: name your org and set its identity and branding at install
-- REST and agent-to-agent (A2A) transport; MCP tool integration
-- Federation: peer discovery, cross-org sync, and publishing to agent registries
+- Org provisioning: name your org and set its identity at install
+- REST and agent-to-agent (A2A) transport
+- Federation: publishes to agent registries out of the box, with opt-in peer discovery and cross-org sync
 
 ### 🤖 Sovereign agents — each person owns theirs
 - `did:key` identity backed by a real keystore (OS keychain or encrypted file)
-- Signed requests, signed action receipts, and a local hash-chained activity log
+- Ed25519-signed requests, signed action receipts, and a local hash-chained activity log
 - An LLM planner with a bring-your-own provider (OpenAI, Anthropic, xAI, Ollama)
-- A consent-gated action sandbox for browser, desktop, shell, files, and network
-- Skills you can install, run, and publish — sandboxed, with revocation
-- A drop-in skill so any **OpenClaw** agent can join an org, plus a desktop app and web UI
+- A consent-gated action layer for browser, desktop, shell, files, and network — capability-scoped, with per-action approval
+- Skills you can install, run, and publish — capability-gated, with revocation
+- A drop-in skill so any **OpenClaw** agent can join an org, plus a reference web renderer you point at the agent's API
 
 ### 🔐 Accountability and trust
 - Signed receipts that are offline-verifiable, hash-chained, and portable
 - The Chronicle: an agent's first-person, receipt-backed public record
-- Human oversight: approve, deny, or escalate, with M-of-N quorum and a consent ledger
-- Reputation scoring with Sybil resistance and duress detection
+- Human oversight: approve, deny, or escalate to the owner, with a hash-chained consent ledger
+- Reputation scoring with counterparty corroboration, Sybil-ring detection, and duress detection
 - Conformance badges that anyone can re-verify offline; enterprise audit via Merkle
-  checkpoints and DSAR/compliance export
-- Governance: approval queues, policy auto-tuning, and time-bounded authority
+  checkpoints and DSAR export
+- Governance: approval queues, bounded policy auto-tuning, and time-bounded authority
+
+### 🛰️ Accountable discovery — the part nobody else has
+- Self-certifying signed registry records, offline-verifiable
+- DID pinning (trust-on-first-use) with tamper alerts
+- Cross-registry divergence detection: your orgs cross-check each other's identity records and flag a lying registry
+- A lean, NANDA-compatible index as a second corroboration source
 
 ### 🎨 Generative UI
 - An A2UI renderer with AG-UI streaming surfaces
@@ -68,9 +75,39 @@ specification you implement yourself.
 - Agents that render their own UI from intent once you supply a model key, with a
   safe fallback to the default shell
 
-### 💱 An agent economy
-- A skills marketplace and revenue tracking, with receipts as value-bearing assets
+### 💱 Agent economy (preview)
+- A signed skills registry, with a test-currency revenue ledger — the accounting is real; payment rails are on the roadmap
 
+## Status at a glance
+
+Every capability above, and exactly where it stands. **✅ live · ◐ opt-in / partial · ⚗️ preview · ✂️ out of scope.**
+
+| Area | Capability | Status |
+| --- | --- | --- |
+| **Org server** | Multi-agent runtime + think/act loop · REST + A2A transport | ✅ |
+| | Org provisioning (name + identity, at install) | ✅ |
+| | Federation — publish to registries | ✅ |
+| | Federation — peer discovery + cross-org sync | ◐ opt-in |
+| | MCP tool integration | ✂️ composes MCP as a complement; not embedded |
+| **Sovereign agent** | `did:key` + real keystore (keychain / encrypted file) | ✅ |
+| | Ed25519-signed requests · signed receipts · hash-chained log | ✅ |
+| | LLM planner, bring-your-own provider (keyless OK) | ✅ |
+| | Consent-gated actions (browser/desktop/shell/files/net) | ✅ capability-gated, not OS-isolated |
+| | Skills: install / run / publish / revoke | ✅ capability-gated |
+| | OpenClaw drop-in skill | ✅ |
+| | Desktop app / bundled web UI | ✂️ headless; BYO reference renderer |
+| **Accountability** | Offline-verifiable, hash-chained, portable receipts · Chronicle | ✅ |
+| | Human oversight: approve / deny / escalate + consent ledger | ✅ (quorum 1-of-1) |
+| | Multi-party (M-of-N) consent quorum | ✂️ out of scope |
+| | Reputation (corroborated) + duress detection | ✅ |
+| | Sybil-ring detection | ◐ audit-only |
+| | Conformance badges (offline) · Merkle checkpoints · DSAR export | ✅ |
+| **Accountable discovery** | Signed registry records · DID pinning · divergence detection · lean index | ✅ |
+| **Generative UI** | A2UI renderer + AG-UI streaming · deterministic keyless shell | ✅ |
+| | Agent-composed UI from intent (key-gated, safe fallback) | ◐ |
+| **Economy** | Signed skill registry (publish / install / review) | ✅ free installs |
+| | Revenue ledger | ⚗️ test currency; settlement on the roadmap |
+| | Receipts as tradeable / financial assets | ✂️ reputation-bearing, not financial |
 
 ## Relationship to the `sm-*` primitives
 
