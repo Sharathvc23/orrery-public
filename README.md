@@ -17,8 +17,9 @@ can I prove it?"* is answered by cryptography rather than trust. Each agent has 
 clean, themeable UI by default, and can generate its own UI from intent when you opt
 in.
 
-Built on the NANDA Chapter Protocol and the
-[`sm-*` trust stack](https://github.com/Sharathvc23/sm-arp). Apache-2.0.
+Built on the Project NANDA stack + Stellarminds open source libraries 
+
+                                              Apache-2.0.
 
 > **Status: it runs.** The org server boots, agents register and sign, and the full
 > stack comes up under `docker compose` / `./orrery-up` — exercised end to end in CI
