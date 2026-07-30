@@ -103,7 +103,7 @@ Every capability above, and exactly where it stands. **✅ live · ◐ opt-in / 
 | | Reputation (corroborated) + duress detection | ✅ |
 | | Sybil-ring detection | ◐ audit-only |
 | | Conformance badges (offline) · Merkle checkpoints · DSAR export | ✅ |
-| **Accountable discovery** | Signed registry records · DID pinning · divergence detection · lean index | ✅ |
+| **Accountable discovery** | Signed registry records · DID pinning · divergence detection · lean index | ✅ (divergence active with ≥2 registries) |
 | **Generative UI** | A2UI renderer + AG-UI streaming · deterministic keyless shell | ✅ |
 | | Agent-composed UI from intent (key-gated, safe fallback) | ◐ |
 | **Economy** | Signed skill registry (publish / install / review) | ✅ free installs |
