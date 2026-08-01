@@ -76,6 +76,13 @@ specification you implement yourself.
 - Agents that render their own UI from intent once you supply a model key, with a
   safe fallback to the default shell
 
+### 🏪 Small business — an agent without infrastructure
+- One call stands up a sovereign agent for a business that runs nothing: identity minted, agent card served, no DNS and no server of its own
+- Every booking emits a signed receipt the customer verifies **offline, in their own browser** — a tampered one is rejected
+- Each business is isolated in a shared runtime: its own identity, keystore and card
+- The public listing is authorised by an **owner principal** whose key the runtime never holds
+- Orrery mints and serves; registering the agent on the public NANDA Index is the card host's step, not ours
+
 ### 💱 Agent economy (preview)
 - A signed skills registry, with a test-currency revenue ledger — the accounting is real; payment rails are on the roadmap
 
@@ -106,6 +113,11 @@ Every capability above, and exactly where it stands. **✅ live · ◐ opt-in / 
 | **Accountable discovery** | Signed registry records · DID pinning · divergence detection · lean index | ✅ |
 | **Generative UI** | A2UI renderer + AG-UI streaming · deterministic keyless shell | ✅ |
 | | Agent-composed UI from intent (key-gated, safe fallback) | ◐ |
+| **Small business** | Provision an agent with no infra · isolated per business | ✅ |
+| | Signed booking receipts · offline verify in the browser | ✅ |
+| | Owner principal authorises the listing (key never held by the runtime) | ◐ OIDC path needs the `owner` extra |
+| | Domain-control proof for domain-owning businesses | ◐ DNS-01 needs the `domain` extra; HTTP-01 does not |
+| | Listed on the public NANDA Index | ⚗️ needs the card host's half — not built by anyone yet |
 | **Economy** | Signed skill registry (publish / install / review) | ✅ free installs |
 | | Revenue ledger | ⚗️ test currency; settlement on the roadmap |
 | | Receipts as tradeable / financial assets | ✂️ reputation-bearing, not financial |
