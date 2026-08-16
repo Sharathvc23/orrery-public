@@ -63,7 +63,7 @@ specification you implement yourself.
 - Conformance badges that anyone can re-verify offline — self-attested, not a third-party audit; Merkle checkpoints and DSAR export
 - Governance: approval queues, bounded policy auto-tuning, and time-bounded authority
 
-### 🛰️ Accountable discovery — the part nobody else has
+### 🛰️ Accountable discovery 
 - Self-certifying signed registry records, offline-verifiable
 - DID pinning (trust-on-first-use) with tamper alerts
 - Cross-registry divergence detection: your orgs cross-check each other's identity records and flag a lying registry. Needs two or more **distinct** registries — with one configured it is inactive
