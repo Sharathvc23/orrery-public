@@ -16,6 +16,7 @@ Orrery is an open-source platform for standing up an **org** that hosts a fleet 
 can I prove it?"* is answered by cryptography rather than trust. Each agent has a
 clean, themeable UI by default, and can generate its own UI from intent when you opt
 in.
+https://github.com/Sharathvc23/orrery
 
 Built on the Project NANDA stack + Stellarminds open source libraries 
 
