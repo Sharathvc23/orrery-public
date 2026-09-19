@@ -1,0 +1,72 @@
+{
+  "action": {
+    "amount": {
+      "cents": 3000,
+      "currency": "USD"
+    },
+    "category": "purchase",
+    "counterparty_label": "domain:amctheatres.com",
+    "human_summary": "2 tickets",
+    "jurisdiction": "US-MA",
+    "outcome": "completed"
+  },
+  "agent_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+  "expect": [
+    "VIOLATED",
+    "revoked"
+  ],
+  "grant": {
+    "authorization_ceremony": null,
+    "delegation": {
+      "max_depth": 4,
+      "parent_grant_id": null
+    },
+    "grant_id": "dat:did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX:9876c7195af5b4ab",
+    "grantee_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+    "grantor_did": "did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX",
+    "human_summary": "Buy movie tickets, <=$50 each, AMC only, MA/NY.",
+    "issued_at": "2026-04-01T00:00:00Z",
+    "not_after": "2026-06-30T23:59:59Z",
+    "not_before": "2026-04-01T00:00:00Z",
+    "revocation": {
+      "max_revocation_age_seconds": 86400,
+      "revocable_by": [
+        "grantor"
+      ],
+      "revocation_lookup_uri": "https://issuer.example/dat/revocations"
+    },
+    "scope": {
+      "action_categories": [
+        "purchase"
+      ],
+      "predicate": null,
+      "stateful": {},
+      "stateless": {
+        "amount_cents_per_action_max": 5000,
+        "amount_currency": "USD",
+        "counterparty_allowlist": [
+          "domain:amctheatres.com"
+        ],
+        "jurisdictions": [
+          "US-MA",
+          "US-NY"
+        ]
+      }
+    },
+    "signature": "r3PxHR0aH/MPnGVsoPJrXtCqVZ3xurC6iRlktoWIlh8SnTf37YJeKJGiEA3ZTvND2ERrPYdnJOhCaj++eVoSDQ==",
+    "version": "dat/0.1"
+  },
+  "issued_at": "2026-04-10T19:00:00Z",
+  "kind": "grant",
+  "name": "revocation_revoked_before",
+  "revocation": {
+    "entries": [
+      {
+        "grant_id": "dat:did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX:9876c7195af5b4ab",
+        "revoked_at": "2026-04-09T00:00:00Z"
+      }
+    ],
+    "fetched_at": "2026-04-10T12:00:00Z",
+    "max_age": 86400
+  }
+}

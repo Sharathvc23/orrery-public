@@ -1,0 +1,92 @@
+name: Bug report
+description: Report incorrect or unexpected behavior in the org server, the agent, or a surface.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Before submitting, please confirm:
+
+        - This is **not a security vulnerability** — those go to sharath@komputix.com with the subject line `[security]`, or through Security → "Report a vulnerability" (see `SECURITY.md`), never a public issue.
+        - You've searched existing issues for duplicates.
+        - You can reproduce the bug on `main` (or note the specific commit where it occurs).
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface is affected?
+      description: Pick the closest match. If unsure, choose "other".
+      options:
+        - "org server (server/, FastAPI)"
+        - "sovereign agent (agent/community_member)"
+        - "installer (orrery-up / docker compose)"
+        - "NANDA / A2A discovery surfaces (agentfacts, did.json, /sm-bridge/*)"
+        - "federation / mesh (/api/federation/*)"
+        - "skill marketplace (/api/skills/*, .nandaskill)"
+        - "A2UI surfaces / reference renderer (renderer/)"
+        - "docs"
+        - "other"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `git rev-parse HEAD`, or the `/health` `git_commit`, or the release tag.
+      placeholder: "abc1234 or v0.2.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps to reproduce. curl commands, `./orrery-up` invocations, or test commands are gold.
+      placeholder: |
+        1. `./orrery-up`
+        2. `curl -X POST localhost:7000/api/members -d '...'`
+        3. Observe response: ...
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened? Include error messages, stack traces, or unexpected output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        - OS + version
+        - Docker / Docker Compose version (or Python version if running from source)
+        - Whether keyless or with an LLM key configured
+      placeholder: |
+        - Ubuntu 22.04
+        - Docker 24.0.7, Compose v2.23
+        - keyless
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Logs, screenshots, theories about root cause — anything that might help triage.
+    validations:
+      required: false

@@ -1,0 +1,699 @@
+{
+  "_comment": "Machine-checked status for AUDIT_HARSH.md. Prose status drifted silently; this is the enforced copy. scripts/audit_gate.py fails on drift.",
+  "audit_document": "AUDIT_HARSH.md",
+  "pinned_sha": "7b1502b9c2c0bc9bb61b30550622cf534c92faa9",
+  "bootstrapped_at": "2026-09-12T21:41:19Z",
+  "self_audit": true,
+  "coverage_note": "LOC and route counts derived at pinned_sha, NOT at HEAD \u2014 the coverage table describes the tree the verdicts were reached against. Regenerate with `python scripts/audit_gate.py --rederive` (needs full history; CI checks out at depth 1).",
+  "coverage": {
+    "agent": {
+      "loc": 80303,
+      "routes": 73
+    },
+    "conformance": {
+      "loc": 6783,
+      "routes": 0
+    },
+    "index": {
+      "loc": 1437,
+      "routes": 6
+    },
+    "infra": {
+      "loc": 6945,
+      "routes": 0
+    },
+    "mcp_server": {
+      "loc": 1286,
+      "routes": 0
+    },
+    "orrery-up": {
+      "loc": 768,
+      "routes": 0
+    },
+    "renderer": {
+      "loc": 3081,
+      "routes": 0
+    },
+    "scripts": {
+      "loc": 7917,
+      "routes": 0
+    },
+    "server": {
+      "loc": 121281,
+      "routes": 221
+    },
+    "skill": {
+      "loc": 2719,
+      "routes": 0
+    },
+    "smb_funnel": {
+      "loc": 6246,
+      "routes": 0
+    },
+    "smb_host": {
+      "loc": 6169,
+      "routes": 6
+    },
+    "smb_signup": {
+      "loc": 1520,
+      "routes": 5
+    }
+  },
+  "findings": [
+    {
+      "id": "C1",
+      "severity": "critical",
+      "title": "LLM API keys stored in plaintext in database",
+      "status": "fixed",
+      "evidence": [
+        "agent/tests/test_encrypted_storage.py::test_set_api_key_encrypts"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C2",
+      "severity": "critical",
+      "title": "OAuth calendar tokens stored in plaintext in database",
+      "status": "overstated",
+      "evidence": [],
+      "note": ""
+    },
+    {
+      "id": "C3",
+      "severity": "critical",
+      "title": "No SSL/TLS on PostgreSQL connection",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_db_tls.py::test_pool_creation_passes_the_resolved_ssl_mode"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C4",
+      "severity": "critical",
+      "title": "Row-level security disabled for 60+ tables",
+      "status": "overstated",
+      "evidence": [],
+      "note": ""
+    },
+    {
+      "id": "C5",
+      "severity": "critical",
+      "title": "No Content Security Policy (CSP) headers",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_csp.py"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C6",
+      "severity": "critical",
+      "title": "Metrics bearer token uses non-constant-time comparison",
+      "status": "overstated",
+      "evidence": [],
+      "note": ""
+    },
+    {
+      "id": "C7",
+      "severity": "critical",
+      "title": "innerHTML with recovery phrase in SMB funnel",
+      "status": "fixed",
+      "evidence": [
+        "smb_funnel/index.html",
+        "server/tests/test_console_endpoints.py"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C8",
+      "severity": "critical",
+      "title": "GITHUB_TOKEN has write-all permissions (no permissions: block)",
+      "status": "fixed",
+      "evidence": [
+        ".github/workflows/ci.yml"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C9",
+      "severity": "critical",
+      "title": "Broadcast signing enforcement defaults OFF in code (env.example says ON \u2014 mismatch)",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_federation_signing.py::test_enforcement_default_on"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C10",
+      "severity": "critical",
+      "title": "Broadcast inbox accepts POST without middleware authentication",
+      "status": "mitigated",
+      "evidence": [
+        "server/tests/test_federation_signing.py"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C11",
+      "severity": "critical",
+      "title": "ORRERY_KEY_SECRET defaults empty \u2014 org signing key stored plaintext at rest",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_secret_sealing.py::test_sealing_required_by_default"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C12",
+      "severity": "critical",
+      "title": "Index has open write surface; `INDEX_ATTESTATION_GATE=off` allows arbitrary record takeover",
+      "status": "fixed",
+      "evidence": [
+        "index/test_attestation_gate.py"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C13",
+      "severity": "critical",
+      "title": "Registry attestation required defaults OFF in code",
+      "status": "fixed",
+      "evidence": [
+        "index/test_attestation_gate.py::test_first_valid_attested_write_pins_and_enforces"
+      ],
+      "note": ""
+    },
+    {
+      "id": "C14",
+      "severity": "critical",
+      "title": "Docker containers run as root with no read-only filesystem",
+      "status": "mitigated",
+      "evidence": [
+        "docker-compose.yml"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H1",
+      "severity": "high",
+      "title": "TOFU (Trust On First Use) inherently weak for agent registration",
+      "status": "residual",
+      "evidence": [],
+      "note": ""
+    },
+    {
+      "id": "H2",
+      "severity": "high",
+      "title": "HMAC legacy auth path remains active for reads",
+      "status": "mitigated",
+      "evidence": [
+        "server/tests/test_member_key_provenance.py::test_legacy_hmac_material_is_not_pinned"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H3",
+      "severity": "high",
+      "title": "OpenClaw skill private key unencrypted at rest",
+      "status": "fixed",
+      "evidence": [
+        "agent/community_member/keystore.py",
+        "agent/tests/test_keystore.py"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H4",
+      "severity": "high",
+      "title": "Federation outbound signing silently degrades when no keypair exists",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_h4_h7_federation_identity.py::test_H4_sign_outbound_refuses_instead_of_returning_empty"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H5",
+      "severity": "high",
+      "title": "No client-side pre-commit hooks (secrets/lint gating)",
+      "status": "fixed",
+      "evidence": [
+        ".pre-commit-config.yaml"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H6",
+      "severity": "high",
+      "title": "First boot registers before `ensure_chapter_keypair` runs (~30s attestation gap)",
+      "status": "fixed-unevidenced",
+      "evidence": [],
+      "note": "No test asserts the keypair-before-register ordering. 'ensure_chapter_keypair' appears only in docstrings and one error message; the ~30s attestation gap the finding describes is not covered by any assertion."
+    },
+    {
+      "id": "H7",
+      "severity": "high",
+      "title": "Peer A2A queries are unsigned (no identity proof)",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_h4_h7_federation_identity.py::test_H7_a2a_query_refuses_rather_than_asking_unsigned"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H8",
+      "severity": "high",
+      "title": "Admin surface unsecured by default (ORG_ADMIN_TOKEN blank in .env.example)",
+      "status": "residual",
+      "evidence": [],
+      "note": ""
+    },
+    {
+      "id": "H9",
+      "severity": "high",
+      "title": "Legitimate peer key rotation causes complete federation breakdown until operator clears pin \u2014 FIXED",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_federation_policy.py::test_clear_did_pin_allows_rotation"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H10",
+      "severity": "high",
+      "title": "No path parameterization for Docker base images",
+      "status": "fixed",
+      "evidence": [
+        "infra/Dockerfile.server"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H11",
+      "severity": "high",
+      "title": "`runtime.txt` declares Python 3.11.9 but 3.12 deployed everywhere else",
+      "status": "fixed",
+      "evidence": [
+        "infra/Dockerfile.server"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H12",
+      "severity": "high",
+      "title": "No vulnerability scanning in CI (no Dependabot/pip-audit)",
+      "status": "fixed",
+      "evidence": [
+        ".github/workflows/ci.yml"
+      ],
+      "note": ""
+    },
+    {
+      "id": "H13",
+      "severity": "high",
+      "title": "`innerHTML` with user data in SMB funnel receipt display",
+      "status": "fixed",
+      "evidence": [
+        "smb_funnel/index.html"
+      ],
+      "note": ""
+    },
+    {
+      "id": "M1",
+      "severity": "medium",
+      "title": "`store_agent_key` OR-preserves old keys on partial update",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_register_member_stores_ed25519.py::test_plain_reregistration_cannot_change_key"
+      ],
+      "note": ""
+    },
+    {
+      "id": "M2",
+      "severity": "medium",
+      "title": "Nonce replay store is memory-only (lost on restart)",
+      "status": "residual",
+      "evidence": [],
+      "note": "Still an in-memory OrderedDict. Bounded at 100K entries with a 600s TTL; a restart empties it, so a nonce may be replayed once across a restart inside the TTL. Design limit, not an oversight."
+    },
+    {
+      "id": "M3",
+      "severity": "medium",
+      "title": "PBKDF2 iterations (200K) below OWASP 2023 recommendation (600K+)",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_secret_sealing.py::test_v1_values_sealed_at_200k_still_decrypt",
+        "server/tests/test_secret_sealing.py::test_new_values_are_written_at_the_raised_iteration_count"
+      ],
+      "note": "PBKDF2_ITERS is still 200_000 in server/secret_sealing.py:45, below the 600K the finding cites. FIXED 2026-09-13, and NOT by bumping the constant. The iteration count is not stored in the blob, so raising PBKDF2_ITERS in place would have re-derived a different key for every already-sealed value and made every sealed secret permanently undecryptable. The format prefix now carries the count: enc.v1 is frozen at 200K and stays readable, enc.v2 writes at 600K. Proven by planting the naive bump, which fails test_v1_values_sealed_at_200k_still_decrypt with InvalidTag."
+    },
+    {
+      "id": "M4",
+      "severity": "medium",
+      "title": "SECURITY DEFINER functions with elevated privileges (15+ functions)",
+      "status": "fixed",
+      "evidence": [
+        "tests/test_init_sql_has_no_security_definer.py",
+        "infra/migrations/0010_no_security_definer.sql",
+        "infra/migrations/0009_drop_unreferenced_tables.sql"
+      ],
+      "note": "FIXED 2026-09-19. Each of the 13 was assessed: seven served only the 45 dead tables and were removed with them (0009); five were orphans of the earlier hosting platform \u2014 reached by no trigger and no code path, one would fail on auth.uid(), and the profile auto-join trigger would have violated a foreign key on the first profile insert \u2014 and are dropped (0010); update_updated_at_column, a generic updated_at bump on five triggers that touches no table, is kept as SECURITY INVOKER. init.sql now declares no SECURITY DEFINER function; tests/test_init_sql_has_no_security_definer.py fails by name if one is added (plant-proved). Verified on Postgres 15: a database migrated from the old schema and one created fresh agree on every function's security mode, column and trigger."
+    },
+    {
+      "id": "M5",
+      "severity": "medium",
+      "title": "f-string SQL in `arp.py._query` with bandit suppression",
+      "status": "overstated",
+      "evidence": [],
+      "note": "arp.py::_query builds `where` from hardcoded literals inside the module, never from input, and binds every runtime value as a ? parameter \u2014 the code states this at the call site. The f-string is not an injection vector. The noqa: S608 remains as the honest marker that a scanner will keep flagging the shape."
+    },
+    {
+      "id": "M6",
+      "severity": "medium",
+      "title": "`detail=str(e)` propagates internal errors in `routes/skills.py`",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_skill_registry.py::test_authored_validation_errors_are_a_caller_facing_type",
+        "server/tests/test_skill_registry.py::test_library_valueerrors_are_not_the_caller_facing_type",
+        "server/tests/test_skill_registry.py::test_routes_answer_library_errors_generically"
+      ],
+      "note": "server/routes/skills.py still has 5 occurrences of detail=str(e), propagating raw exception text to callers. FIXED 2026-09-13, and narrower than the finding read. All five sites caught ValueError, and every raise in skill_registry is authored FOR the caller ('manifest too large (max N bytes)', 'bump version') \u2014 echoing those is correct and removing them would make the API worse. The real leak was that json.JSONDecodeError and binascii.Error are also ValueError subclasses, so a malformed body returned library text this project did not write. SkillInputError(ValueError) now separates the two: 23 authored raises retyped, routes echo that type and answer anything else with 'malformed request' while logging the detail. Both regressions planted and caught."
+    },
+    {
+      "id": "M7",
+      "severity": "medium",
+      "title": "No custom `@app.exception_handler` \u2014 tracebacks could leak in non-prod profiles",
+      "status": "overstated",
+      "evidence": [
+        "server/tests/test_error_disclosure_boundary.py"
+      ],
+      "note": "No @app.exception_handler in server/chapter_agent.py or agent/community_member/server.py. OVERSTATED, measured 2026-09-13. The premise is wrong: Starlette puts a traceback in the RESPONSE only when the app is built with debug=True, and neither app sets it \u2014 verified by running an unhandled exception through a default FastAPI app, which returns a bare 'Internal Server Error' with the traceback going to the log. Adding a handler would have been redundant code justified by an unchecked finding. What the review DID surface: bare `except Exception` handlers that echo str(e) exist on /admin/api/audit/* and the agent dashboard \u2014 but those are admin-token and local-API-token gated, the audience is the operator, and they truncate at 200 chars. Guarded instead of patched: 4 tests pin that debug is never enabled, that the public skills surface never echoes an untyped exception, and that any bare-Exception echo stays bounded."
+    },
+    {
+      "id": "M8",
+      "severity": "medium",
+      "title": "SMB funnel has no CSP",
+      "status": "fixed",
+      "evidence": [
+        "smb_funnel/index.html"
+      ],
+      "note": "smb_funnel/index.html now carries a Content-Security-Policy meta (line 15). Verified 2026-09-13."
+    },
+    {
+      "id": "M9",
+      "severity": "medium",
+      "title": "No authentication on local agent API (any local process can read/write agent state)",
+      "status": "residual",
+      "evidence": [],
+      "note": "The local agent API is unauthenticated by design \u2014 'no auth needed, your machine'. The residual is that ANY local process, not just the owner, can read and write agent state. Accepted for a loopback surface; it is not a remote exposure."
+    },
+    {
+      "id": "M10",
+      "severity": "medium",
+      "title": "`/api/surfaces/compose` is OPEN (LLM token drain vector)",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_compose_endpoint_fallback.py::test_compose_is_on_the_expensive_write_tier",
+        "server/tests/test_compose_endpoint_fallback.py::test_compose_is_actually_unauthenticated"
+      ],
+      "note": "FIXED 2026-09-13. /api/surfaces/compose is unauthenticated and calls an LLM per request, but was absent from EXPENSIVE_WRITE_LIMITS, so it inherited the generic 30/min write ceiling \u2014 6x the allowance of /api/digest/build, which is on that table for the same reason and does strictly more work per call. Now 5/min. Checked and ruled out first: llm_runtime.CYCLE_BUDGET does NOT cover this path, it bounds the autonomous think loop and is reset by the cycle owner. Recorded in the code: this is a RATE limit, not a spend cap \u2014 per-source and per-process, so a distributed caller still costs money."
+    },
+    {
+      "id": "M11",
+      "severity": "medium",
+      "title": "`/api/digest/build` is OPEN (data extraction vector)",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_digest_build_gate.py",
+        "server/auth_verify.py",
+        "server/chapter_agent.py",
+        "scripts/e2e_probes.py"
+      ],
+      "note": "FIXED 2026-09-16. POST /api/digest/build now requires a signed member or the operator X-Admin-Token bearer, refused at the middleware (removed from the open-POST set in auth_verify.is_open_path; added to is_admin_bearer_path) AND in the handler (build_digest_endpoint checks _resolve_caller / check_admin_token_header itself), so re-adding one string to the open set does not reopen it. MEASURED FIRST on a local Compose org from the unmodified tree, real handler, keyless (deterministic) path: one member registered with a display name and skills, one intent submitted with contact details in its text, then an unauthenticated POST with publish:false. The response carried the intent text verbatim in top_intents[0].text and again in summary_markdown (the fallback quotes the first three intents at 100 chars), and the joiner's agent_id, name and skills in new_members[0] -- a seven-day membership roster the directory does not serve anonymously. With the default publish:true the same anonymous call appended a chapter.digest.weekly row (event_log id 3) attributed to the org. WHY GATE RATHER THAN ALLOWLIST: the digest's highlights ARE member-authored (intent text, joiner identity); stripped to fields an anonymous reader may already see it would be counts plus federation peer transitions, which is not a digest. The rows it reads are delivered over SSE only to a signed member (MIN_TRUST_TO_SUBSCRIBE is 0.0 for member.joined and intent.published, but the stream 401s without a caller), so the route sits at that tier now. The rate limit was never the point; it bounds cost, and the finding was about content. Plant-proved (each reddens the named test): re-adding the route to the open set -> test_post_digest_build_requires_a_credential; removing the handler check -> test_ADVERSARIAL_handler_refuses_even_when_the_middleware_classifier_is_open; both together -> test_ADVERSARIAL_anonymous_build_is_refused_and_leaks_no_member_text; wrapping the handler check in a default-off env flag -> test_ADVERSARIAL_gate_holds_with_no_flag_set. Re-measured on the rebuilt local org after the change: anonymous POST 401 with none of the seeded text in the body; the same POST signed by the member 200 with the digest. NOT CHANGED: any signed member may publish (publish:true) a digest event, bounded by the 5/min ceiling and attributable to the signer; restricting publish to leader/admin is a governance decision left open, not a leak."
+    },
+    {
+      "id": "M12",
+      "severity": "medium",
+      "title": "No client-side pre-commit hooks",
+      "status": "fixed",
+      "evidence": [
+        ".pre-commit-config.yaml"
+      ],
+      "note": "Duplicate of H5 \u2014 the same missing-pre-commit-hooks finding recorded twice. .pre-commit-config.yaml exists with 3 hook repos."
+    },
+    {
+      "id": "M13",
+      "severity": "medium",
+      "title": "All CI actions pinned by tag, not SHA",
+      "status": "fixed",
+      "evidence": [
+        ".github/workflows/ci.yml"
+      ],
+      "note": "49 `uses:` references across the workflows are tag-pinned; 0 are SHA-pinned. FIXED 2026-09-13. All 49 `uses:` references across the five workflows are now pinned to a 40-char commit SHA with the human-readable tag kept as a trailing comment. Verified: 0 tag-pinned, 49 SHA-pinned."
+    },
+    {
+      "id": "M14",
+      "severity": "medium",
+      "title": "Dockerfile.index uses inline ranged pip install (non-reproducible)",
+      "status": "fixed",
+      "evidence": [
+        "index/requirements.lock",
+        "infra/Dockerfile.index"
+      ],
+      "note": "infra/Dockerfile.index:12 still does an inline ranged `pip install` with no lockfile or constraints. FIXED 2026-09-13. infra/Dockerfile.index now installs from index/requirements.lock \u2014 18 packages, fully resolved, hash-pinned, with --require-hashes so pip refuses anything the lock did not name. Mirrors the house style already used by Dockerfile.server (server/requirements.lock). Verified by building the image: succeeds."
+    },
+    {
+      "id": "M15",
+      "severity": "medium",
+      "title": "`asyncpg` unpinned in `requirements.txt`",
+      "status": "fixed",
+      "evidence": [
+        "server/requirements.txt"
+      ],
+      "note": "server/requirements.txt:95 still lists asyncpg with no version specifier. FIXED 2026-09-13. asyncpg was the only unpinned entry in the file; now >=0.30.0,<1.0 \u2014 a floor plus a major bound, matching the >= convention every sibling uses. Unpinned entries remaining: 0."
+    },
+    {
+      "id": "M16",
+      "severity": "medium",
+      "title": "No rate limiter key limit on store dict (memory exhaustion)",
+      "status": "residual",
+      "evidence": [],
+      "note": ""
+    },
+    {
+      "id": "M17",
+      "severity": "medium",
+      "title": "CORS `allow_methods=[\"*\"]` and `allow_headers=[\"*\"]`",
+      "status": "residual",
+      "evidence": [],
+      "note": "allow_methods/allow_headers remain ['*'], but allow_origins is ALLOWED_ORIGINS rather than '*', so the browser boundary is still origin-restricted. Wildcards on methods and headers do not widen who may call."
+    },
+    {
+      "id": "M18",
+      "severity": "medium",
+      "title": "A2A interop exempt from method-binding (replayable across a2a/run)",
+      "status": "residual",
+      "evidence": [],
+      "note": "METHOD_BINDING_EXEMPT_PATHS still carries /a2a and /run. The exemption is deliberate and documented at the definition: those paths use the legacy v0.2 scheme for interop. Replay within that scheme is the accepted cost of A2A compatibility."
+    },
+    {
+      "id": "M19",
+      "severity": "medium",
+      "title": "No `Vary: Origin` header on CORS responses",
+      "status": "overstated",
+      "evidence": [],
+      "note": "No Vary header anywhere in server/chapter_agent.py, so CORS responses remain cacheable across origins. OVERSTATED, measured 2026-09-13. Two CORS paths and neither needs the header added. Starlette's CORSMiddleware already emits `Vary: Origin` when allow_origins is an explicit list, which this deployment uses \u2014 verified by running it. The custom public_read_cors middleware sends `Access-Control-Allow-Origin: *`, which is identical for every origin, so a cache serving it to any origin is correct and Vary is not required. Adding the header would have been redundant code justified by an unchecked finding."
+    },
+    {
+      "id": "M20",
+      "severity": "medium",
+      "title": "Detailed auth error messages aid attackers",
+      "status": "residual",
+      "evidence": [
+        "server/tests/test_auth_status_header_no_reason.py",
+        "server/chapter_agent.py",
+        "spec/0.5/signing.md"
+      ],
+      "note": "RESIDUAL, accepted 2026-09-19. The 401 BODY keeps the specific reason (key_mismatch, no_stored_key, invalid_signature, nonce_replay, method_binding_required, ...) because the spec mandates it: spec/0.5/signing.md step 5 requires HTTP 401 with {\"error\": \"<specific reason>\"} from a closed set, spec/0.2/protocol.md section 3.1 names key_mismatch for a second key on a known agent_id, and the umbrella server conformance suite asserts it on the wire (test_R1_tofu_idempotence_rejects_key_mismatch). THE COST, STATED: the reason string can distinguish a known agent_id presented with the wrong key (key_mismatch / invalid_signature) from an id this org has never seen (no_stored_key); that is a spec-level decision, recorded here rather than hidden behind a generic body Orrery would then be non-conformant for. MEASURED 2026-09-19 on the real middleware (GET /api/members): known id + wrong key + DID header -> 401 key_mismatch; unknown id + fresh key + DID header -> 200 via TOFU bootstrap, i.e. before the TOFU-eligibility fix the STATUS CODE answered the membership question and the reason string was not what leaked it. RE-MEASURED 2026-09-19 on main after the TOFU-eligibility fix (fbdbebf), same probe, GET /api/members: known id + wrong key + DID header -> 401 key_mismatch; unknown id + fresh key + DID header -> 401 unknown_agent, no key stored, no directory read. Without the DID header: known id + bad signature -> 401 invalid_signature; unknown id -> 401 no_stored_key. Both sides are now 401 with identical bodies except the reason string, and the reason string is the residual: key_mismatch/invalid_signature name an id with a stored key, unknown_agent/no_stored_key name one without. unknown_agent is not in spec/0.5/signing.md's closed set; the closed-set change replaces it with no_stored_key and holds every wire reason to the set (server/tests/test_wire_reasons_closed_set.py). Four rows on that tree, GET /api/members: known id + wrong key + DID -> 401 key_mismatch; unknown id + fresh key + DID -> 401 no_stored_key; known id + bad signature, no DID -> 401 invalid_signature; unknown id, no DID -> 401 no_stored_key. The residual is exactly: stored-key ids answer key_mismatch/invalid_signature, unknown ids answer no_stored_key. WHAT WAS FIXED: the X-Auth-Status response header carried the reason too (unverified:<reason>) on every default-open GET whose body is the same for everyone (/api/digest, /api/events, /api/thoughts, /version, ... thirty paths measured), which is not covered by the spec's mandate and let an unauthenticated caller learn membership from a 200. It now says verified or unverified and nothing else; test_auth_status_header_no_reason.py asserts the known-id and unknown-id responses on those paths are identical in status, body and every header. The specific reason still reaches the operator through metrics.record_signing_failure."
+    },
+    {
+      "id": "L1",
+      "severity": "low",
+      "title": "Membership oracle via `/api/agents/{id}/profile`",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_profile_consent_gate.py",
+        "server/chapter_agent.py",
+        "docs/audit/L1_PROFILE_CONSENT.md",
+        "server/tests/test_anonymous_member_disclosure.py"
+      ],
+      "note": "FIXED 2026-09-14. GET /api/agents/{id}/profile now serves only members who opted in through POST /api/me/listing, reading the same agents.config.listing record member_listing.consent_of reads; a member who never answered gets a 404 byte-identical to the one for an id that was never registered, so closing the disclosure does not open a membership oracle in its place. The member-authored description is no longer published: it was the card subtitle, the C7 vector, and the field sm-listing 0.1 4.2 forbids in a published entry. Gated on member consent only, NOT on ORRERY_LISTING_ENABLED \u2014 that flag governs the listing document, and the consent endpoint accepts an opt-in regardless of it. Federated peers get the same answer as anyone; no org-to-org bypass was added. Plant-proved against three defects, including a gate given its own 404 detail, which is the oracle-for-disclosure trade this fix exists to avoid. LIVE CONSEQUENCE: no member on the deployed mesh has opted in, so every profile 404s after deploy; that is the intended end state. FOLLOW-UP 2026-09-19: the same disclosure and the same oracle existed on GET /agents/{id}, /.well-known/agentfacts/{id}.json, /api/agents/{id}/trust and /api/agents/{id}/aae-events, and /sm-bridge/index enumerated every member with description to an anonymous GET (measured on a deployed org: 23 members). Prose stripped from the three public documents; trust and aae-events answer a stranger about a silent member exactly as about an unknown id; the sm-bridge index lists only members who opted in. Separately, a never-registered signer was TOFU-accepted on every signed-only gate; a verified signature now counts as a member only for a registered id outside the A2A interop surfaces.",
+      "design_note": "docs/audit/L1_PROFILE_CONSENT.md"
+    },
+    {
+      "id": "L2",
+      "severity": "low",
+      "title": "`/admin/index.html` served without auth",
+      "status": "residual",
+      "evidence": [
+        "server/tests/test_admin_route_gate_coverage.py"
+      ],
+      "note": "RESIDUAL, accepted 2026-09-14. /admin/ and /admin/index.html serve the static admin UI unauthenticated so an operator can load the page and paste their token into it; a paste-your-token page cannot be gated on the token it exists to collect, and a public login page is the norm (Django, Grafana, Keycloak). The token itself is secrets.token_hex(32) compared with compare_digest, so guessing is not the threat. REFINED 2026-09-14: the acceptance leaned on '/admin/api/* requires the token (30 _authorize_admin call sites)'. Measured against the running app: 16 /admin/api/* routes, all classified OPEN by the middleware (auth_verify.is_open_path returns True for the whole prefix) with authentication delegated to each handler. All 16 are gated today (14 _authorize_admin, 2 _require_admin), but 0 are covered by the route-enumeration guard -- test_route_auth_classification selects on the third state (not open AND not requires_auth) and the admin API is not in it -- and test_admin_api_authz's parametrized table holds 2 entries, both under the different /api/admin/trust/* prefix. THE COST, STATED: the open page is accepted and reveals a little reconnaissance. The enumeration gap is CLOSED 2026-09-14: server/tests/test_admin_route_gate_coverage.py derives the admin route set from app.routes and calls each one unauthenticated and with a wrong token, requiring 401/403; a 422 fails as a probe that never reached the handler, and GET /admin/api/status with a correct token is the positive control. Plant-proved against three defects: an ungated route, a gate that checks header presence only (caught by the wrong-token assertion alone), and an ungated route hidden behind body validation. Design note: docs/audit/L2_ADMIN_SURFACE.md.",
+      "design_note": "docs/audit/L2_ADMIN_SURFACE.md"
+    },
+    {
+      "id": "L3",
+      "severity": "low",
+      "title": "`pg_store.py` injection boundary well-designed but untested against edge cases",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_pg_store.py"
+      ],
+      "note": "The finding was 'well-designed but untested'. test_pg_store.py now carries 37 tests including test_lit_escapes_single_quotes and test_build_rpc_escapes_values."
+    },
+    {
+      "id": "L4",
+      "severity": "low",
+      "title": "Legacy plaintext org key rows remain readable indefinitely",
+      "status": "fixed",
+      "evidence": [
+        "server/tests/test_chapter_keypair_persistence.py::test_C11_existing_plaintext_row_is_sealed_in_place",
+        "server/tests/test_chapter_keypair_persistence.py::test_C11_offline_plaintext_file_is_sealed_in_place"
+      ],
+      "note": "_unseal_secret still returns non-prefixed values as-is, so legacy plaintext rows stay readable indefinitely with no migration path. ALREADY FIXED, verified 2026-09-13 rather than re-implemented. The finding says legacy plaintext rows 'never get' migrated; sovereign_identity._migrate_plaintext_row (called at line 178) and _migrate_plaintext_file (line 206) seal both the DB row and the offline key file in place on boot, logging loudly and retrying next boot on failure. unseal() tolerating plaintext is what MAKES that migration possible, not the gap. Proven in production this session: the org did:key was unchanged across the deploy, so the existing sealed key round-tripped."
+    },
+    {
+      "id": "L5",
+      "severity": "low",
+      "title": "Ephemeral (in-memory-only) key fallback with no persistence",
+      "status": "residual",
+      "evidence": [],
+      "note": "The ephemeral fallback remains, and the code now names the consequence at the site: without persistence the chapter's signing key is a fresh random key per process."
+    },
+    {
+      "id": "L6",
+      "severity": "low",
+      "title": "Agent-side crypto documented as AES-256-GCM but is HMAC-SHA256 encrypt-then-MAC (fixed)",
+      "status": "fixed",
+      "evidence": [
+        "agent/tests/test_sm_bridge_agentfacts.py::test_auth_is_ed25519_not_hmac"
+      ],
+      "note": ""
+    },
+    {
+      "id": "L7",
+      "severity": "low",
+      "title": "`agent_key_rotation` nonce check fail-closed on DB error",
+      "status": "residual",
+      "evidence": [],
+      "note": "_nonce_seen still returns True on a DB error, blocking rotation. Fail-closed is the correct direction for a replay check; the residual is the availability cost, which is stated rather than fixed."
+    },
+    {
+      "id": "L8",
+      "severity": "low",
+      "title": "`_usage_count` fail-closed design \u2014 correct but availability impact",
+      "status": "residual",
+      "evidence": [],
+      "note": "_usage_count still raises UsageLookupError into a deny on DB error. Deliberate fail-closed; the finding itself records it as correct with an availability cost."
+    },
+    {
+      "id": "L9",
+      "severity": "low",
+      "title": "Hardcoded UUIDs in init.sql triggers",
+      "status": "fixed-unevidenced",
+      "evidence": [],
+      "note": "init.sql still carries 2 hardcoded UUIDs (a seed chapter id and an a0000000- sentinel). Neither is in a trigger, so the finding as written may be fixed, but nothing asserts it and the residual was not distinguishable from source alone."
+    },
+    {
+      "id": "L10",
+      "severity": "low",
+      "title": "`session_id` in public cookie is deterministic",
+      "status": "overstated",
+      "evidence": [],
+      "note": "OVERSTATED \u2014 re-searched 2026-09-19 and there is no public cookie and no server-minted session id. Searched non-test source under server/, agent/, smb_host/, smb_signup/, index/, mcp_server/, skill/, smb_funnel/, renderer/ for: session_id (case-insensitive), set_cookie, Set-Cookie, document.cookie, Cookie(, session_token, SESSION_SECRET, sessionId. agent/community_member/wizard.py: zero hits for 'session'. Cookie hits: none that set one (four prose mentions in browser_page.py, local_auth.py \u2014 which explicitly refuses to carry the local token in a cookie \u2014 and sandbox/policy.py). The only session_id in the tree is the A2A JSON-RPC 'sessionId' request parameter (agent/community_member/a2a_rpc.py, a2a_client_v2.py, task_store.py): a caller-supplied task-grouping key echoed back on the task, never a credential and never a cookie; a caller who supplies none gets mint_task_id(), which is random. The finding described a cookie-based session mechanism this codebase does not have."
+    },
+    {
+      "id": "L11",
+      "severity": "low",
+      "title": "Event payloads can include user-submitted text flowing through SSE to subscribers",
+      "status": "residual",
+      "evidence": [
+        "server/tests/test_event_text_provenance.py",
+        "server/event_types.py"
+      ],
+      "note": "RESIDUAL, accepted 2026-09-14. Event payloads are validated against the closed schema in event_types before publication, which bounds their SHAPE but not the text inside a permitted field. The server does not escape on the way out because it does not know the rendering context, and escaping at the producer would make consumers worse off; a subscriber that renders the text unescaped has an XSS, and the flaw lives in the subscriber. REFINED 2026-09-14: three corrections. (a) The untrusted set is bounded and enumerable, not general -- Literal, HttpUrl, float and int fields cannot carry a payload; the text-bearing fields are member.joined name/skills, intent.published text/tags, chapter.broadcast title/body/tags, and the weekly digest's headline/summary_markdown. (b) Three of those four event types are 0.0 in MIN_TRUST_TO_SUBSCRIBE, so the consumers are anonymous and unbounded. (c) For ChapterDigestWeeklyPayload the closed schema does not bound shape either: top_intents, new_members and federation_changes are bare list[dict] by design. Also: sanitize_text is not an XSS defence (it truncates, drops null bytes and strips prompt-injection markers, does nothing to HTML) and is not applied on the publish path. THE COST, STATED: Orrery publishes no event schema at all, so a subscriber cannot learn which fields are untrusted even if it wants to. Design note: docs/audit/L11_EVENT_TEXT_PROVENANCE.md. CLASSIFICATION LANDED 2026-09-14: event_types.UNTRUSTED_TEXT_FIELDS and SERVER_AUTHORED_TEXT_FIELDS cover every text-bearing payload field (rule: server-authored iff THIS server produced the value; a value merely constrained here does not qualify), enforced by server/tests/test_event_text_provenance.py, which derives the field set from model_fields so a field cannot land unclassified, and served at GET /api/event-catalog. Plant-proved against four defects: an unclassified new field, a classification outliving its field, a field in both classes, and a catalog drifting from the tables. Still residual: a consumer may ignore what it was told, which this server cannot close.",
+      "design_note": "docs/audit/L11_EVENT_TEXT_PROVENANCE.md"
+    },
+    {
+      "id": "L12",
+      "severity": "low",
+      "title": "`public_read_cors` middleware path list is a `frozenset` that could miss new public paths",
+      "status": "residual",
+      "evidence": [],
+      "note": "_PUBLIC_CORS_PATHS is still a frozenset requiring manual addition. The failure mode is a new public path silently missing CORS \u2014 restrictive rather than permissive, which is the safe direction."
+    },
+    {
+      "id": "L13",
+      "severity": "low",
+      "title": "Rate limiter runs BEFORE auth \u2014 unauthenticated callers share same bucket",
+      "status": "residual",
+      "evidence": [],
+      "note": "Rate limiting still runs before auth. Deliberate: it is what makes the limiter useful against unauthenticated scrapers. The residual is that a flood of anonymous requests consumes the bucket authenticated callers share."
+    },
+    {
+      "id": "L14",
+      "severity": "low",
+      "title": "`in` operator in pg_store `_filter` splits on comma within parentheses",
+      "status": "residual",
+      "evidence": [],
+      "note": "The `in` handler still splits on comma inside parentheses \u2014 PostgREST-dialect parsing, so a value containing a comma cannot be expressed. A correctness limit on the filter language, not an injection path."
+    },
+    {
+      "id": "L15",
+      "severity": "low",
+      "title": "TOFU audit logs contain truncated signature (`signature[:90]`)",
+      "status": "fixed-unevidenced",
+      "evidence": [],
+      "note": "No file in the repository mentions the truncated-signature behaviour at all. Nothing was found that would fail if the truncation returned."
+    },
+    {
+      "id": "H14",
+      "severity": "high",
+      "title": "POST /t/{tenant_id}/book is unauthenticated, unbounded and unrated on a live public host",
+      "status": "fixed",
+      "evidence": [
+        "smb_host/test_main.py::test_book_refuses_an_oversized_notes_field",
+        "smb_host/test_main.py::test_book_refuses_an_oversized_body_before_parsing",
+        "smb_host/test_main.py::test_book_rate_limits_one_source_without_affecting_another",
+        "smb_host/test_main.py::test_book_rate_check_precedes_tenant_lookup"
+      ],
+      "note": "smb_host. Measured 2026-09-12: live host returns 404 not 401 for an anonymous POST /t/<id>/book; locally a single anonymous 2MB notes field returned 200 and grew the tenant store by 4,015,349 bytes (~2x, persisted in the booking store and again in the signed receipt). No max_length on BookRequest, no body cap, no rate limit in smb_host, and no delete route so growth is permanent. Availability/cost only; no confidentiality or integrity impact found. FIXED 2026-09-12: per-field max_length (the storage bound, independent of transfer encoding), a Content-Length body cap (memory bound, evadable by a chunked sender and documented as such), and a per-source sliding-hour limiter keyed on the same _caller_discriminator the host already records. Re-running the original exploit: 2MB notes now 413 with 0 bytes growth (was 200 / 4,015,349 bytes); 130 rapid anonymous bookings now 120 through then 429. DEPLOYED 2026-09-12T22:27Z at 6eea2e8 (GitHub-triggered, checkSuites). Verified on the live host: 200KB body 413 (was 404/accepted), 10KB notes 422, well-formed small body still 404, tenant count unchanged at 83 so the volume survived. The live 429 is NOT verified: proving it needs ~120 real requests against a production service, and the limiter is unit-tested instead.",
+      "deployed": true
+    },
+    {
+      "id": "L16",
+      "severity": "low",
+      "title": "Existence oracle at the Index resolution hop: GET /agents/{id}, /.well-known/agentfacts/{id}.json, /sm-bridge/resolve/{id} answer 200 for a known member and 404 for an unknown id to an anonymous caller",
+      "status": "residual",
+      "evidence": [
+        "server/routes/identity.py",
+        "server/sm_bridge_adapter.py",
+        "server/tests/test_anonymous_member_disclosure.py"
+      ],
+      "note": "RESIDUAL by ruling 2026-09-19. These three routes are the NANDA Index resolution hop for a member whose card was published: a resolver that got the id from the Index fetches them next. They disclose existence only \u2014 the member-authored description was stripped from all three and the sm-bridge index and delta feed enumerate only members who opted in (see L1's follow-up). Gating existence on listing consent would 404 Index resolution for every published-but-unconsented member, which is a product decision about what a published card means, not an engineering one; the cost is stated here so the ruling can be revisited. The enumeration these routes could seed is closed elsewhere: the catalog and directory withhold members from a stranger, so an id has to be known already."
+    },
+    {
+      "id": "L17",
+      "severity": "low",
+      "title": "The v0.3 nonce replay store is memory-only: a captured signed request replays inside the timestamp window after a restart",
+      "status": "residual",
+      "evidence": [
+        "server/auth_verify.py"
+      ],
+      "note": "RESIDUAL by ruling 2026-09-19, with the bound stated. auth_verify._v03_replay_store is an in-process OrderedDict (TTL 600s, capped) and the timestamp window is +/-300s (verify_request max_age). A request captured on the wire and replayed within 300s of its timestamp is accepted once per process restart, because the restart empties the store. Bounded to one window per restart and to requests already accepted once; not exploitable without a wire capture. A durable nonce store through the rate_limit_persistence pattern (periodic snapshot to Postgres, restored at boot) is the follow-up; it was not folded into the release-blocker pass because it puts a table on the path of every signed request and deserves its own measurement."
+    }
+  ],
+  "scope_note": "smb_host and smb_signup examined 2026-09-12; previously zero references. See docs/audit/SCOPE.md."
+}

@@ -1,0 +1,105 @@
+name: llm capability probe
+
+# Measures what a local OpenAI-compatible endpoint actually does with the two
+# request shapes shipped code depends on — a forced tool_choice, and
+# response_format={"type":"json_object"} — and compares the result against the
+# committed measurement in docs/integrations/llm-compat-probe.json.
+#
+# WHY NIGHTLY RATHER THAN PER-PR. The thing being measured is not our code. It
+# is a model file and an inference server, both of which change under us: a new
+# ollama release, a re-pulled tag, or a quantisation change can turn a honoured
+# constraint into a silently dropped one without a single line changing here.
+# A per-PR run would tell us about our diff, which is not where this failure
+# comes from.
+#
+# NO HOSTED KEY. Everything runs against a loopback ollama. A hosted provider
+# needs a credential this workflow deliberately does not have, so the hosted
+# columns of the committed file are refreshed by hand and this job never
+# silently reports on models it did not reach.
+
+on:
+  schedule:
+    # 04:20 UTC — off the hour, so it does not queue behind everything else.
+    - cron: "20 4 * * *"
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "space-separated model ids to probe"
+        required: false
+        default: "llama3.1:8b phi3:mini"
+      trials:
+        description: "attempts per capability case"
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install openai
+
+      - name: install ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: start ollama
+        run: |
+          ollama serve &
+          # Wait for the endpoint rather than sleeping a guessed interval: a
+          # cold start that has not finished looks exactly like an endpoint
+          # that ignores every capability, and would be recorded as one.
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+              echo "ollama up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "ollama did not come up within 120s"; exit 1
+
+      - name: pull models
+        env:
+          MODELS: ${{ github.event.inputs.models || 'llama3.1:8b phi3:mini' }}
+        run: |
+          for m in $MODELS; do
+            echo "pulling $m"
+            ollama pull "$m"
+          done
+
+      - name: probe
+        env:
+          MODELS: ${{ github.event.inputs.models || 'llama3.1:8b phi3:mini' }}
+          TRIALS: ${{ github.event.inputs.trials || '5' }}
+        run: |
+          python scripts/probe_llm_compat.py \
+            --provider ollama \
+            --models $MODELS \
+            --trials "$TRIALS" \
+            --out /tmp/llm-compat-probe.json
+
+      - name: compare against the committed measurement
+        # Reports drift; does not fail the job. A model whose behaviour changed
+        # is a finding to read, not a broken build — and failing here would
+        # train people to ignore a red cron. The diff is the artifact.
+        run: |
+          python scripts/llm_compat_diff.py \
+            docs/integrations/llm-compat-probe.json \
+            /tmp/llm-compat-probe.json \
+            | tee /tmp/llm-compat-diff.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: llm-compat-probe
+          path: |
+            /tmp/llm-compat-probe.json
+            /tmp/llm-compat-diff.txt
+          retention-days: 30

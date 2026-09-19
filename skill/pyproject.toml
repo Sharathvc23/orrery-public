@@ -1,0 +1,43 @@
+[project]
+name = "orrery-skill"
+version = "0.2.0"
+description = "Drop-in skill that lets any OpenClaw agent join an Orrery org."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sharath Chandra", email = "sharath@komputix.com" }]
+keywords = ["openclaw", "agents", "org", "skill", "ed25519"]
+# This is an OpenClaw skill *bundle* (helpers/ + SKILL.md), not a pip library —
+# it is distributed to ClawHub, not PyPI. pyproject exists for dependency
+# resolution and test config only; there is no wheel target.
+dependencies = ["httpx", "base58", "cryptography"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/Sharathvc23/orrery"
+
+[tool.pytest.ini_options]
+# helpers/ is a flat module dir (helpers import each other as `from sign_request import ...`),
+# matching how the OpenClaw runtime loads the bundle. Put it on the path for tests.
+pythonpath = ["helpers"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+# Same correctness gate as the rest of the sm-* family (E/F/I/UP). E501
+# line-length reflow + opinionated families are a follow-up tightening.
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+# mypy (R2): strict on the shipped helpers (what the OpenClaw skill
+# actually executes); tests stay outside the gate.
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
+files = ["helpers"]

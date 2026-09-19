@@ -1,0 +1,46 @@
+{
+  "action": {
+    "amount": {
+      "cents": 3000,
+      "currency": "USD"
+    },
+    "category": "purchase",
+    "counterparty_label": "domain:amctheatres.com",
+    "human_summary": "2 tickets",
+    "jurisdiction": "US-MA",
+    "outcome": "completed"
+  },
+  "agent_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+  "expect": [
+    "VIOLATED",
+    "self_grant"
+  ],
+  "grant": {
+    "authorization_ceremony": null,
+    "delegation": {
+      "max_depth": 4,
+      "parent_grant_id": null
+    },
+    "grant_id": "dat:did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH:94ab84deb1288e87",
+    "grantee_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+    "grantor_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+    "human_summary": "I authorize myself to buy anything.",
+    "issued_at": "2026-04-01T00:00:00Z",
+    "not_after": "2026-06-30T23:59:59Z",
+    "not_before": "2026-04-01T00:00:00Z",
+    "revocation": null,
+    "scope": {
+      "action_categories": [
+        "purchase"
+      ],
+      "predicate": null,
+      "stateful": {},
+      "stateless": {}
+    },
+    "signature": "LvnbUMVBj5khloNljFQ+YPpSsnTQ5J4Xt+rCeANbtr6skOTJYFwg1Y/6RGmjW9e/ZH8vKCJYRK/5TvGAwkA5AA==",
+    "version": "dat/0.1"
+  },
+  "issued_at": "2026-04-10T19:00:00Z",
+  "kind": "grant",
+  "name": "self_grant"
+}

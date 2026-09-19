@@ -1,0 +1,71 @@
+name: Feature request
+description: Suggest a new feature, enhancement, or capability.
+title: "[feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature. Before submitting:
+
+        - Skim [`docs/ROADMAP.md`](../../docs/ROADMAP.md) and [`docs/CLAIMS.md`](../../docs/CLAIMS.md) — your idea may already be planned or explicitly out of scope.
+        - New trust **primitives** live in their own `sm-*` repo, not in Orrery — Orrery composes them as pinned upstream dependencies (see [`docs/integrations/STELLARMINDS.md`](../../docs/integrations/STELLARMINDS.md)). Propose a protocol change upstream, not here.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The user-facing pain or capability gap that motivates this feature.
+      placeholder: |
+        Today, an operator has no way to X. They want to Y, but the org only supports Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed solution
+      description: Concrete sketch of what would change. Pseudo-code, API shape, mock surface — whatever's clearest.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider? Why is this the best one?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface would change?
+      options:
+        - "org server (server/)"
+        - "sovereign agent (agent/)"
+        - "installer / ops (orrery-up, compose)"
+        - "discovery / federation surfaces"
+        - "skill marketplace"
+        - "A2UI surfaces / renderer"
+        - "an upstream sm-* primitive (requires an upstream change)"
+        - "multiple / cross-cutting"
+    validations:
+      required: true
+
+  - type: textarea
+    id: backward_compat
+    attributes:
+      label: Backward-compatibility implications
+      description: Would this break deployed orgs, running agents, stored receipts, or a frozen wire id? If yes, how do we migrate?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Are you willing to contribute the implementation?
+      options:
+        - label: "Yes, I'd like to open a PR for this"
+        - label: "Yes, but I'd appreciate review of the design first"
+        - label: "No, I'm just proposing — maintainers welcome to pick it up"

@@ -1,0 +1,7 @@
+{
+  "name": "tasks",
+  "version": "1.0.0",
+  "description": "A simple local to-do list: add, list, and complete tasks.",
+  "capabilities": [],
+  "builtin": true
+}

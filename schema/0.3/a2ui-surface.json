@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanda.org/schema/0.3/a2ui-surface.json",
+  "title": "A2UI v0.9 Surface Envelope",
+  "description": "Top-level envelope returned by GET /api/surfaces/{page_id} on a v0.3 chapter when ?schema=v0.8 is NOT requested. See spec/0.3/a2ui.md §1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["createSurface", "updateComponents", "version"],
+  "properties": {
+    "createSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surfaceId"],
+      "properties": {
+        "surfaceId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "updateComponents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surfaceId", "root", "components"],
+      "properties": {
+        "surfaceId": { "type": "string", "minLength": 1 },
+        "root": { "type": "string", "minLength": 1 },
+        "components": {
+          "type": "array",
+          "items": { "$ref": "a2ui-component.json" }
+        }
+      }
+    },
+    "version": { "const": "0.9" }
+  }
+}

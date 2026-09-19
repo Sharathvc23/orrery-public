@@ -1,0 +1,23 @@
+{
+ "action": {
+  "category": "message_sent",
+  "counterparty_did": "did:key:z6MkgNxXV6Pam2hA1wM68K9GUS64m8oWZvViDeErhcoyF1DU",
+  "counterparty_label": "B",
+  "human_summary": "x",
+  "outcome": "completed"
+ },
+ "evidence": {
+  "witness_signatures": [
+   {
+    "signature": "pIfyon9nyXmPPY7B+GGIBPh0yx/MMyeqBPU1YIzK+nTzPn8Qg1tU4cAFGGyxqHs4be8H9FjmyeZQPXyZ+Y5fAA==",
+    "witness_did": "did:key:z6MkgNxXV6Pam2hA1wM68K9GUS64m8oWZvViDeErhcoyF1DU"
+   }
+  ]
+ },
+ "issued_at": "2026-09-19T01:21:16Z",
+ "issuer_did": "did:key:z6MkhNLZifraQshUQRXgvVg6YXUaFTfooaUazZ5XXkkYLhe8",
+ "principal_did": "did:key:z6MkhNLZifraQshUQRXgvVg6YXUaFTfooaUazZ5XXkkYLhe8",
+ "receipt_id": "d4082b01-14ff-4c94-9e3f-20dff65384bc",
+ "signature": "/XYQMOvODhybPaqrLZ7bUDDZJ2hwvPRhDJ7ez/OzCekptDw+dI5PHIpGnVTePJQCpSvIo+XvfaQHjxHs53BaBQ==",
+ "version": "arp/0.1"
+}

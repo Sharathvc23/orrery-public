@@ -1,0 +1,41 @@
+# Supply-chain constraints for the agent install (R3).
+# Applied via `pip install -c constraints.txt` in CI and infra/Dockerfile.agent
+# so a transitive dependency can never float an sm-* package off its pin.
+#
+# sm-arp is unified at 0.3.2 across server and agent: sm-parc 0.2.3 lifted its
+# <0.3 cap (verified compatible upstream — the DAT bridge is opt-in), ending
+# the split the previous pins documented.
+# Bump procedure: docs/integrations/STELLARMINDS.md.
+#
+# sm-authority 0.2.0 is a SECURITY bump ([sm-authority issue 2](https://github.com/Sharathvc23/sm-authority/issues/2), the confused-deputy in
+# the OIDC evidence path). Under 0.1.0 an oidc block with no nonce VERIFIES
+# while `grantor_did` is never consulted, so any holder of a valid ID token for
+# a subject — every relying party that person has signed into — can assemble a
+# VERIFIED envelope naming their OWN key as grantor. Reproduced against both
+# published wheels before bumping: 0.1.0 returns VERIFIED/ok for exactly that
+# envelope; 0.2.0 returns INDETERMINATE/malformed_evidence.
+# Do NOT pin back, and do NOT construct OIDCVerifier(require_nonce=False) — that
+# flag restores the vulnerable behaviour in full (measured: VERIFIED/ok again),
+# it is a migration-only escape hatch, and it warns loudly.
+sm-aae==0.1.0
+sm-arp==0.3.2
+sm-authority==0.2.0
+#
+# sm-bridge 0.6.0 (from 0.4.1): maintenance, no security driver. 0.5.0's
+# delegated binding-write surface is consumed by nanda-connect, which Orrery does
+# not use; 0.6.0 adds an opt-in [feed] extra we deliberately do NOT take (see
+# below) and fixes sm_bridge.__version__, which was a hardcoded literal — a 0.5.0
+# install reports '0.4.1' (measured). Orrery never reads that attribute, so the
+# drift is upstream hygiene, not a correctness issue here.
+# The >=0.4.1 FLOOR in pyproject.toml is deliberately NOT raised: every symbol
+# Orrery imports exists in 0.4.1 with an identical shape (verified by
+# introspection across both wheels), so 0.4.1 remains the honest minimum API.
+# The lockfiles are what CI and the image install; the floor states a requirement.
+# NOT taking [feed]: it hash-chains the delta log for COMPLETENESS, but Orrery's
+# DeltaStore is in-memory and reseeds from a wall-clock base_seq on every restart
+# (_monotonic_base_seq) — deliberately gapped. A completeness-verifiable
+# feed over an intentionally gapped log would either false-alarm every restart or
+# claim a guarantee the store cannot honour.
+sm-bridge==0.6.0
+sm-conformance==0.3.2
+sm-parc==0.2.3

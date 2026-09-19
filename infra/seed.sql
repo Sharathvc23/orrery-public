@@ -1,0 +1,13 @@
+-- ═══════════════════════════════════════════════════════════════
+-- Seed data — intentionally empty.
+--
+-- A fresh Orrery org starts with NO agents, members, or demo content. The
+-- deployer names and shapes their org through the first-run setup wizard
+-- (POST /api/org/config), and real agents/members populate the tables as they
+-- join. No "demo personas" are preloaded — an org should look like *theirs* on
+-- first boot, not like a sample dataset.
+--
+-- (Add your own bootstrap rows below if you want a pre-populated demo; keep
+-- every column in sync with infra/init.sql or the load will abort
+-- under ON_ERROR_STOP and later init steps — e.g. grants — won't run.)
+-- ═══════════════════════════════════════════════════════════════

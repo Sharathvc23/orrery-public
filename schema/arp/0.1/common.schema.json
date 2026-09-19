@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarminds.ai/schemas/sm-arp/0.1/common.schema.json",
+  "title": "ARP Common Definitions",
+  "description": "Shared definitions used across ARP v0.1 schemas. Referenced via $ref from receipt, action, evidence, jurisdiction, and accessibility.",
+  "$defs": {
+    "didKey": {
+      "type": "string",
+      "pattern": "^did:key:z[1-9A-HJ-NP-Za-km-z]{32,}$",
+      "description": "did:key identifier as defined in W3C did:key method (multibase base58btc over multicodec 0xed01 || Ed25519 pubkey32). The leading 'z' indicates base58btc encoding."
+    },
+    "uuidv4": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Canonical UUIDv4 string."
+    },
+    "rfc3339UtcTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC 3339 timestamp, second precision, UTC, terminated with 'Z'."
+    },
+    "rfc3339Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "RFC 3339 timestamp with optional fractional seconds and any timezone offset (used inside machine_payload, etc.)."
+    },
+    "base64Ed25519Signature": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{86}==$",
+      "description": "Base64-encoded 64-byte Ed25519 signature with padding (88 chars total including '==' padding)."
+    },
+    "sha256Hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 hash with the 'sha256:' prefix and lowercase hex digest."
+    },
+    "iso4217Currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 three-letter uppercase currency code."
+    },
+    "iso3166Code": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}(-[A-Z0-9]{1,3})?$",
+      "description": "ISO 3166-1 alpha-2 country code, optionally followed by '-' and an ISO 3166-2 subdivision code."
+    },
+    "bcp47LanguageTag": {
+      "type": "string",
+      "pattern": "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$",
+      "description": "BCP 47 language tag (loose form — full grammar is too restrictive for JSON Schema regex; pragmatic pattern matches common cases like 'en', 'en-US', 'zh-Hant-TW')."
+    },
+    "ianaMediaType": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9!#$&^_.+-]+/[a-zA-Z0-9!#$&^_.+-]+$",
+      "description": "IANA media type / MIME type."
+    },
+    "amount": {
+      "type": "object",
+      "required": ["currency", "cents"],
+      "additionalProperties": false,
+      "properties": {
+        "currency": { "$ref": "#/$defs/iso4217Currency" },
+        "cents": {
+          "type": "integer",
+          "description": "Integer amount in the smallest currency unit. Negative = outgoing from the principal's perspective."
+        }
+      }
+    },
+    "extensionsObject": {
+      "type": "object",
+      "description": "Forward-compatible additions. Keys MUST be namespace-prefixed (<domain>.<field>).",
+      "patternProperties": {
+        "^[a-z0-9-]+(\\.[a-z0-9-]+)+\\.[a-zA-Z0-9_-]+$": {}
+      },
+      "additionalProperties": false
+    }
+  }
+}

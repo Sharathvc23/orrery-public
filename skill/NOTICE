@@ -1,0 +1,35 @@
+Orrery Org Skill (OpenClaw)
+===========================
+
+Copyright (c) 2026 Sharath Chandra / Stellarminds.ai (https://stellarminds.ai).
+
+The software is licensed under the MIT License — see LICENSE for the
+full terms.
+
+What this is
+------------
+
+The OpenClaw skill that registers any OpenClaw agent as a reduced-trust
+member of an org. Published to ClawHub as `orrery-org`. Conforms to the
+org protocol v0.3 by default, with a v0.2 fallback for older orgs.
+
+Relationship to the protocol
+----------------------------
+
+This skill is one reference runtime of the org protocol — the
+reduced-trust client surface. It is part of Orrery
+(https://github.com/Sharathvc23/orrery).
+
+How to attribute downstream
+---------------------------
+
+Distributions of this software must preserve the LICENSE and NOTICE
+files. Modified versions should add their own copyright lines below
+the existing ones without removing the original attribution.
+
+Contact
+-------
+
+- Orrery: https://github.com/Sharathvc23/orrery
+- Stellarminds.ai: https://labs.stellarminds.ai
+- Skill page on ClawHub: search for `orrery-org`.

@@ -1,0 +1,74 @@
+# Client-side fast path. Install once with:  pre-commit install
+#
+# ⚠️ THIS IS NOT A CONTROL. Hooks run on a developer's machine and `git commit
+# --no-verify` bypasses them silently, so nothing here is enforcement. The
+# enforcement lives in .github/workflows/ci.yml — the `secret-scan` job (which
+# cannot be skipped) and the lint/type jobs. This file exists so a mistake is
+# caught in two seconds instead of after it is already in history, which for a
+# secret is the difference between a fix and a rotation.
+#
+# ⚠️ EVERY VERSION HERE IS PINNED, AND PINNED TO WHAT CI RUNS. A hook that lints
+# with a different ruff than the pipeline reports different results than the gate,
+# and the developer learns to distrust the hook. If you change a version in
+# ci.yml, change it here in the same commit.
+#
+# NOTE ON `make ci-local`: the sm-* OSS repos wire their hooks to that target so
+# there is one definition of "the checks". Orrery has no Makefile, so there is no
+# such target to point at; these hooks therefore mirror ci.yml's pinned tools and
+# arguments directly. That mirroring is a real drift risk and is called out in the
+# PR rather than papered over — a shared entrypoint would be the better fix and is
+# not in this change's scope.
+repos:
+  # ── Secrets. The one that matters most, because a leaked credential is the only
+  # class here that cannot be fixed by a follow-up commit.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3 # same version + release the CI secret-scan job pins by checksum
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged changes only)
+
+  # ── Lint/format. ruff==0.15.13 is what ci.yml installs; the fleet pins the same
+  # exact version after an unpinned `ruff>=0.4` silently broke three sibling repos
+  # the moment anyone opened a PR.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      # Scoped to the components ci.yml actually lints. Repo-wide it flags
+      # scripts/publish_host39_card.py, which the pipeline never checks — so an
+      # unscoped hook would fail on code that is green in CI, which teaches people
+      # to pass --no-verify and defeats the whole hook.
+      - id: ruff
+        name: ruff check (components CI lints)
+        files: ^(index|smb_host|skill|agent|server|conformance/(tests|client))/
+      # Scoped to smb_host/ and agent/ ON PURPOSE — the only two components ci.yml
+      # runs `ruff format --check` in. Measured, not assumed: unscoped it rewrites
+      # ~90 files in components the pipeline deliberately does not format-check,
+      # imposing a standard CI does not have. Widen this only when ci.yml does.
+      - id: ruff-format
+        name: ruff format (smb_host, agent — matching CI)
+        files: ^(smb_host|agent)/
+
+  # ── Cheap correctness checks that cost nothing and catch real mistakes.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        name: workflows and configs parse
+      - id: check-json
+      - id: check-merge-conflict
+      # Catches a pasted PEM block — a class gitleaks' rules can miss.
+      # The two exclusions are verified false positives, not silenced findings:
+      # both files contain only the PEM *header text* as a marker constant and in
+      # assertions that a stored key IS encrypted at rest — never key material.
+      # (This comment deliberately avoids quoting that header verbatim: doing so
+      # made the hook flag this very file, which is a neat demonstration that the
+      # rule matches on the string alone rather than on anything sensitive.)
+      # Checked for real material: zero PEM blocks with any body in either file.
+      - id: detect-private-key
+        exclude: ^skill/(helpers/sign_request\.py|tests/test_identity_key_at_rest\.py)$
+# DELIBERATELY ABSENT: end-of-file-fixer and trailing-whitespace.
+# They are the usual additions here and they are wrong for this repo. Measured
+# rather than assumed: enabling them rewrites 100+ files on `--all-files`, and the
+# set includes agent/tests/vectors/sm_dat/**.json — conformance vectors whose exact
+# bytes are load-bearing, since digests are computed over them. A whitespace "fix"
+# there is a silently broken fixture. Non-mutating checks only.

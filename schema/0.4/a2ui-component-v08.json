@@ -1,0 +1,632 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanda.org/schema/0.4/a2ui-component-v08.json",
+  "title": "A2UI v0.8 Component (OpenClaw wire shape)",
+  "description": "A single component in an A2UI v0.8 surface envelope. v0.8 has no `component` discriminator field: the payload is nested under a type-name KEY alongside `id`, so a component is exactly two properties \u2014 {id, <TypeName>: {...}}. Only the 25 types the runtime can downgrade to v0.8 are permitted (surfaces._V09_TO_V08_PASSTHROUGH); the 10 v0.9-only types (_V09_ONLY) MUST have degraded to Text before reaching the wire, so a `Heading` key here is a downgrade bug, not a valid component. Each payload schema is the corresponding native v0.10 def from a2ui-component.json minus `id`/`component`, because the downgrade copies the payload verbatim (including the optional v0.10 `meta` block, which the runtime does NOT strip).",
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false,
+  "minProperties": 2,
+  "maxProperties": 2,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ActionButton": {
+      "$ref": "#/$defs/ActionButton"
+    },
+    "Alert": {
+      "$ref": "#/$defs/Alert"
+    },
+    "Avatar": {
+      "$ref": "#/$defs/Avatar"
+    },
+    "Badge": {
+      "$ref": "#/$defs/Badge"
+    },
+    "Card": {
+      "$ref": "#/$defs/Card"
+    },
+    "Chip": {
+      "$ref": "#/$defs/Chip"
+    },
+    "ChipGroup": {
+      "$ref": "#/$defs/ChipGroup"
+    },
+    "Column": {
+      "$ref": "#/$defs/Column"
+    },
+    "Divider": {
+      "$ref": "#/$defs/Divider"
+    },
+    "Form": {
+      "$ref": "#/$defs/Form"
+    },
+    "Grid": {
+      "$ref": "#/$defs/Grid"
+    },
+    "Image": {
+      "$ref": "#/$defs/Image"
+    },
+    "Input": {
+      "$ref": "#/$defs/Input"
+    },
+    "Link": {
+      "$ref": "#/$defs/Link"
+    },
+    "List": {
+      "$ref": "#/$defs/List"
+    },
+    "Metric": {
+      "$ref": "#/$defs/Metric"
+    },
+    "Progress": {
+      "$ref": "#/$defs/Progress"
+    },
+    "Row": {
+      "$ref": "#/$defs/Row"
+    },
+    "Select": {
+      "$ref": "#/$defs/Select"
+    },
+    "Stat": {
+      "$ref": "#/$defs/Stat"
+    },
+    "Tabs": {
+      "$ref": "#/$defs/Tabs"
+    },
+    "Text": {
+      "$ref": "#/$defs/Text"
+    },
+    "TextArea": {
+      "$ref": "#/$defs/TextArea"
+    },
+    "Toast": {
+      "$ref": "#/$defs/Toast"
+    },
+    "Toggle": {
+      "$ref": "#/$defs/Toggle"
+    }
+  },
+  "$defs": {
+    "idRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "childrenArray": {
+      "description": "Either a bare array of id-refs (v0.9) or {explicitList:[...]} (v0.8 back-compat).",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/idRef"
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "explicitList"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "explicitList": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/idRef"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ActionButton": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "action"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "default",
+            "secondary",
+            "outline",
+            "destructive",
+            "ghost",
+            "link"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Alert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message"
+      ],
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "default",
+            "success",
+            "warning",
+            "error"
+          ]
+        }
+      }
+    },
+    "Avatar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        }
+      }
+    },
+    "Badge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "default",
+            "secondary",
+            "destructive",
+            "outline"
+          ]
+        },
+        "color": {
+          "type": "string"
+        }
+      }
+    },
+    "Card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "child"
+      ],
+      "properties": {
+        "child": {
+          "$ref": "#/$defs/idRef"
+        }
+      }
+    },
+    "Chip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "selected": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ChipGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "children"
+      ],
+      "properties": {
+        "children": {
+          "$ref": "#/$defs/childrenArray"
+        },
+        "multi": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "children"
+      ],
+      "properties": {
+        "children": {
+          "$ref": "#/$defs/childrenArray"
+        }
+      }
+    },
+    "Divider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "axis": {
+          "enum": [
+            "horizontal",
+            "vertical"
+          ]
+        }
+      }
+    },
+    "Form": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "children",
+        "action"
+      ],
+      "properties": {
+        "children": {
+          "$ref": "#/$defs/childrenArray"
+        },
+        "action": {
+          "type": "string"
+        },
+        "submitLabel": {
+          "type": "string"
+        }
+      }
+    },
+    "Grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "children"
+      ],
+      "properties": {
+        "children": {
+          "$ref": "#/$defs/childrenArray"
+        },
+        "cols": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "Image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "alt": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "Input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "inputType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "Link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "url"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "List": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ordered": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "label"
+      ],
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "trend": {
+          "enum": [
+            "up",
+            "down",
+            "neutral"
+          ]
+        }
+      }
+    },
+    "Progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "label": {
+          "type": "string"
+        },
+        "color": {
+          "enum": [
+            "default",
+            "green",
+            "yellow",
+            "red"
+          ]
+        }
+      }
+    },
+    "Row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "children"
+      ],
+      "properties": {
+        "children": {
+          "$ref": "#/$defs/childrenArray"
+        }
+      }
+    },
+    "Select": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "options"
+      ],
+      "properties": {
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "value"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "Stat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "value"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "Tabs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tabs"
+      ],
+      "properties": {
+        "tabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "child"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "child": {
+                "$ref": "#/$defs/idRef"
+              }
+            }
+          }
+        }
+      }
+    },
+    "Text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "usageHint": {
+          "enum": [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "body",
+            "caption"
+          ]
+        }
+      }
+    },
+    "TextArea": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "Toast": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message"
+      ],
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "default",
+            "success",
+            "warning",
+            "error"
+          ]
+        }
+      }
+    },
+    "Toggle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "checked": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

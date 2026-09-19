@@ -1,0 +1,75 @@
+{
+  "profile": "sm-federation/0.1",
+  "contract_source": "sm_federation.wire \u2014 the installed distribution, not a copy in this repo",
+  "_comment": [
+    "Every surface the published federation profile defines, with a CLAIM about",
+    "whether Orrery implements it. The claim is not a label that exempts: the",
+    "suite checks it in BOTH directions.",
+    "",
+    "  implemented = true  -> the surface must respond AND validate against the",
+    "                         published schema. A drifted implementation fails.",
+    "  implemented = false -> the surface must genuinely be absent. The moment it",
+    "                         starts responding, this entry fails and has to be",
+    "                         flipped to true \u2014 at which point the schema",
+    "                         validation above applies to it.",
+    "",
+    "So an unimplemented surface cannot be quietly shipped non-conformant, and a",
+    "conformant one cannot quietly regress. Nothing is exempted by being listed.",
+    "",
+    "DEPLOYMENT-CONDITIONAL SURFACES. `implemented` is a fact about the RUNTIME.",
+    "A surface may additionally depend on what a given DEPLOYMENT can provide \u2014",
+    "the \u00a74 feed needs its durable table, so a node with no database, or whose",
+    "role cannot create it, degrades to \u00a72-only. Those are different questions and",
+    "collapsing them would force a choice between two lies: claiming false for a",
+    "surface Orrery implements, or demanding 200 from a node that correctly",
+    "refuses to pretend it can serve it.",
+    "",
+    "So such a surface carries `deployment_conditional: true` and the status it",
+    "answers when unavailable. The suite then checks the property that actually",
+    "matters and is checkable in any deployment: THE ENDPOINT AND THE DESCRIPTOR",
+    "AGREE. Serving the feed obliges declaring federation/0.1#4; declaring it",
+    "obliges serving it. Nothing is exempted \u2014 the unavailable status is pinned,",
+    "so a surface cannot go quietly missing behind a 404, and `implemented:false`",
+    "still means the route must not exist at all."
+  ],
+  "surfaces": [
+    {
+      "id": "node-descriptor",
+      "spec": "spec/federation/0.1/federation.md \u00a72",
+      "kind": "http",
+      "method": "GET",
+      "path": "/.well-known/agent-community.json",
+      "schema": "node-descriptor",
+      "implemented": true,
+      "note": "Implemented and merged 2026-08-08. Validated live against the published node-descriptor schema by this suite. Orrery serves \u00a72 only \u2014 see the intelligence-feed claim for \u00a74, and the sm-federation protocol notes for why federation_versions cannot say so."
+    },
+    {
+      "id": "intelligence-feed",
+      "spec": "spec/federation/0.1/federation.md \u00a74",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/federation/intelligence/feed",
+      "schema": null,
+      "implemented": true,
+      "note": "Implemented by the intelligence-feed work; the assertions that judge it landed first. GET /api/federation/intelligence/feed?since=<cursor> serves a signed, hash-chained sm-feed page. server/federation_feed.py backs sm_feed.FeedLog with the durable append-only table public.federation_feed_entries, so the chain outlives the process that wrote it and a reseed is detectable rather than silent. Note precisely what has been demonstrated: server/tests/test_federation_feed.py test_D1 is a STORE-level restart (rebuild from the persisted rows, next append continues at the durable tip). The PROCESS-level assertion is test_feed_restart.py in this directory and it has NOT run \u2014 _boot() constructs its TestClient without entering the lifespan, so the instance never runs the boot ensure, never advertises a feed, and always skips, on any deployment. feed_id is the org's did:key \u2014 the same key /.well-known/did.json publishes as publicKeyMultibase \u2014 so the feed is attributable to the node a peer discovered. The descriptor advertises it as feed_url and build_node_descriptor DERIVES federation/0.1#4 from that, so this claim and the wire declaration cannot disagree. may_degrade: the boot ensure degrades rather than crashing when the app role lacks DDL privilege, when the database is unreachable, or when the DDL file is not in the image \u2014 bricking a self-hosted install to add an optional feature is worse than the feature being absent. So an instance that implements \u00a74 may legitimately serve no feed and declare \u00a72 only; presence is not the property to assert, coherence is. Such a node answers 501, not 404: the surface exists in the runtime and this deployment cannot serve it. CORRECTION, previously stated the other way here and in server/constraints.txt: the refusal of sm-bridge's [feed] extra does NOT show Orrery cannot have a completeness-verifiable feed. Two different logs \u2014 sm-bridge chains the MEMBER-DELTA store, in-memory and reseeded from a wall-clock base on every restart; the sm-federation feed carries INTELLIGENCE ENVELOPES on a durable store. The refusal stays correct for the delta store and says nothing about this one.",
+      "may_degrade": true
+    },
+    {
+      "id": "intelligence-envelope-emitter",
+      "spec": "spec/federation/0.1/federation.md \u00a73",
+      "kind": "emitter",
+      "emitter": "server/federation_intelligence.py:get_our_summary()",
+      "schema": "intelligence-envelope",
+      "implemented": false,
+      "note": "get_our_summary() emits a chapter-shaped document, not a federation-intel/0.1 envelope: no `type`, no `version`, no `generated_at`, and its identity fields are `chapter_id`/`chapter_name` rather than `community_id`/`community_name`. The full field-level delta, with every field classified, is in envelope_field_map.json."
+    },
+    {
+      "id": "skill-match-algorithm",
+      "spec": "spec/federation/0.1/federation.md \u00a74 (find_skill_matches)",
+      "kind": "algorithm",
+      "emitter": "server/federation_intelligence.py:find_skill_matches()",
+      "implemented": false,
+      "note": "Orrery has a function of the same name with a different contract. The reference returns [{skill, community_id, community_name, weight}] ranked by weight, matching skills exactly. Orrery returns [{our_gap, their_chapter_id, their_chapter_name, their_matching_skills, their_member_count}], unranked, matching by case-insensitive substring in either direction \u2014 so `ml` matches `html`. The divergence is in the matching rule, not only the shape, so this is not a rename."
+    }
+  ]
+}

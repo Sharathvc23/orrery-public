@@ -1,0 +1,7 @@
+{
+  "name": "summarize",
+  "version": "1.0.0",
+  "description": "Summarize a block of text using the agent's own LLM.",
+  "capabilities": [],
+  "builtin": true
+}

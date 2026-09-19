@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security disclosure
+    url: mailto:sharath@komputix.com?subject=%5Bsecurity%5D
+    about: Report a vulnerability privately by email, subject "[security]" — or through Security → "Report a vulnerability". See SECURITY.md. Do NOT file public issues for security matters.
+  - name: Discussion / question
+    url: https://github.com/Sharathvc23/orrery/discussions
+    about: Ask a question, share an idea, or discuss design — for anything that isn't a bug report or feature request.

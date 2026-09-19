@@ -1,0 +1,46 @@
+[project]
+name = "orrery-lean-index"
+version = "0.1.0"
+description = "Lean NEST-compatible agent registry — the second corroboration leg for cross-registry divergence detection."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sharath Chandra", email = "sharath@komputix.com" }]
+keywords = ["agents", "registry", "nanda", "index", "discovery"]
+# A two-file FastAPI service deployed from infra/Dockerfile.index — pyproject
+# exists for dependency resolution, lint config, and test config only.
+# cryptography/jcs/base58 are the attestation-gate verification stack (F2
+# stage 2) — dependency-budget decision recorded in docs/HARDENING.md.
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "cryptography>=42.0.0",
+    "jcs>=0.2.1",
+    "base58>=2.1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.24.0", "ruff>=0.15"]
+
+[project.urls]
+Homepage = "https://github.com/Sharathvc23/orrery"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+# Same correctness gate as the rest of the repo (E/F/I/UP). E501 line-length
+# reflow + opinionated families are a follow-up tightening.
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+# mypy (R2): strict — the index is small and fully typed.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+files = ["main.py", "attestation_gate.py"]

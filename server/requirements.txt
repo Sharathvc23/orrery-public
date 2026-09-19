@@ -1,0 +1,97 @@
+fastapi>=0.100.0
+qrcode==8.2
+uvicorn>=0.20.0
+httpx>=0.24.0
+python-dotenv>=1.0.0
+openai>=1.0.0
+pydantic>=2.0.0
+sse-starlette>=1.6.0
+PyNaCl>=1.5.0
+base58>=2.1.1
+rich>=13.0.0
+jcs>=0.2.1
+# ARP verifier (vendored _arp_verify) — needs cryptography for Ed25519
+# signature verification, jsonschema for JSON Schema validation of
+# incoming receipts, and referencing for $ref resolution across the
+# vendored schema bundle in _arp_verify/schemas/. Same versions as
+# the repo's conformance/ uses.
+cryptography>=42.0.0
+jsonschema>=4.20.0
+referencing>=0.30.0
+
+# Stellarminds integration libraries (github.com/Sharathvc23) — EXACT pins,
+# never a moving branch ref (supply-chain rule R3; CI's supply-chain-pins job
+# enforces this). Bump procedure: docs/integrations/STELLARMINDS.md.
+#
+# VRP reputation core (counterparty corroboration, collusion severance, nanda-rep
+# scoring, facts attestation) — the un-vendored sm_arp.vrp. conformance/vrp stays
+# canonical; sm-arp is the published mirror, drift-guarded by tests/test_vrp_lockstep.py.
+sm-arp==0.3.2
+# sm-aae — Attested Action Envelope: signed, per-agent-chained pre-action
+# authorization verdicts. Today the server side only converts envelopes for
+# the viewer (aae_export.py); governance/admission permits adopt it post-1.0.
+sm-aae==0.1.0
+# sm-locp — W3C Verifiable Credentials issuer (ComplianceCredential
+# variant). Future use: emit compliance VCs alongside ARP receipts
+# for chapter actions falling under a known regulatory regime.
+# On PyPI since 0.2.1 (2026-07-08) — normal exact pin, mirrored in
+# constraints.txt like the rest of the sm-* family.
+sm-locp==0.2.1
+# sm-bridge — NANDA-compatible registry endpoints + Quilt delta sync.
+# Future use: serve /sm-bridge/index, /resolve, /deltas alongside
+# existing /agentfacts.json so federation peers and crawlers can
+# discover chapter members via the standard Stellarminds shape.
+sm-bridge==0.6.0
+# sm-conformance — signed conformance-badge envelope (build/verify/suite
+# digest). conformance_boot.py mints the org's self-attested boot badge with
+# it; same primitive the agent's badge uses.
+sm-conformance==0.3.2
+# sm-divergence (+ its zero-dep kernel sm-resolver) — cross-registry
+# corroboration: by-id fetch classification + the pure divergence diff behind
+# registry_divergence.py. Reference implementation of
+# draft-chandra-agent-registry-corroboration-00. sm-resolver is pinned
+# explicitly (not just transitively) so the kernel can never float.
+sm-divergence==0.8.0
+sm-resolver==0.2.0
+# sm-federation — the published agent-community federation protocol (node
+# descriptor + intelligence envelope + signed sm-feed transport). routes/identity
+# builds /.well-known/agent-community.json with the PUBLISHED
+# build_node_descriptor rather than a local dict literal, so the wire contract
+# has one definition instead of a mirror nothing compares.
+#
+# ⚠️ 0.5.0 IS A CORRECTNESS FLOOR FOR THIS RUNTIME, NOT A ROUTINE BUMP, for two
+# independent reasons:
+#   * 0.4.0 made `capabilities` section tokens part of the contract and bound
+#     federation/0.1#4 to a non-empty feed_url IN BOTH DIRECTIONS, enforced in
+#     the JSON Schema. build_node_descriptor DERIVES the tokens; a 0.2.0 builder
+#     emits none, so serving feed_url on 0.2.0 produces a descriptor the
+#     published schema REJECTS. (Measured: this file and conformance/federation/
+#     had drifted to two different pins for one contract — server on 0.2.0 while
+#     the suite validated against 0.4.2 — which is why the guard below exists.)
+#   * 0.5.0 fixed the §4 seam itself: through 0.4.2 `read_intelligence` called
+#     verify_page WITHOUT expected_head, so a subscriber could not detect a
+#     publisher that RESTARTED ITS SEQUENCE at all — dropped and reordered were
+#     caught, a reseed returned plain `ok`. That is the exact that change failure this
+#     org's feed exists to make impossible, so anything below 0.5.0 would ship
+#     the guarantee with its central case missing.
+# §4 IS NOW TAKEN, unlike sm-bridge's [feed] extra above — see that entry, which
+# refuses a DIFFERENT log for a reason that still stands.
+sm-federation==0.6.0
+# sm-feed — sm-federation's signed-transport dependency. Pinned EXPLICITLY rather
+# than left transitive, exactly as sm-resolver is under sm-divergence: an sm-*
+# package must never float, including one we reach only through another.
+sm-feed==0.2.0
+# sm-listing — the consented member-listing profile. Orrery serves
+# /.well-known/agent-listing.json with the PUBLISHED build_listing, never a local
+# dict: the builder validates every entry and RAISES on one it cannot publish,
+# which is §3's presence half and the reason a hand-assembled document would be
+# strictly worse than no document.
+sm-listing==0.3.0
+# 0.3.0 is a correctness floor, not a bump: it defines the MANDATORY well-known
+# path as WELL_KNOWN_PATH (0.1.0 defined none, so orrery chose one and chose
+# differently), and it rolls up the loader fix for consent that was hydrated at
+# opt-in and never rebuilt on boot — a consenting member silently vanishing on
+# restart.
+# M15: was the only unpinned entry in this file. A floor plus a major bound, matching
+# the >= convention used by every sibling above; installed today is 0.31.0.
+asyncpg>=0.30.0,<1.0

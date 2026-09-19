@@ -1,0 +1,7 @@
+{
+  "id": "team",
+  "name": "Team / Nonprofit pack",
+  "description": "Get more done with your team: summarize long text, draft a message or email, and keep a shared-style to-do list. Uses your own LLM.",
+  "default_installed": false,
+  "skills": ["summarize", "draft", "tasks"]
+}

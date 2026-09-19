@@ -1,0 +1,39 @@
+{
+  "spec_version": "0.3",
+  "spec_ref": "spec/0.3/signing.md#canonical-string",
+  "description": "(method, url_path, body, agent_id, timestamp, nonce) -> v0.3 canonical string. Expected computed by orrery's spec_reference.",
+  "cases": [
+    {
+      "id": "register-openclaw-typical-v03",
+      "description": "Register under v0.3 \u2014 method+path+body+id+ts+nonce bound positionally.",
+      "input": {
+        "method": "POST",
+        "url_path": "/api/members",
+        "body": "{\"agent_id\":\"alice\",\"origin\":\"openclaw\"}",
+        "agent_id": "alice",
+        "timestamp": "1714003200",
+        "nonce": "n-abc123"
+      },
+      "expected": {
+        "canonical_string": "POST:/api/members:{\"agent_id\":\"alice\",\"origin\":\"openclaw\"}:alice:1714003200:n-abc123",
+        "signature_b64": "c/k2k24uiQnCJST1n0vuWPwj60htcsIkSge1lS3eAJ5Qdxh6meLqnXS63JENQepuUhJVmgGl6kqpxi3ZAz+4AA=="
+      }
+    },
+    {
+      "id": "intent-get-v03",
+      "description": "GET-style empty body under v0.3.",
+      "input": {
+        "method": "GET",
+        "url_path": "/api/intents",
+        "body": "",
+        "agent_id": "alice",
+        "timestamp": "1714003200",
+        "nonce": "n-def456"
+      },
+      "expected": {
+        "canonical_string": "GET:/api/intents::alice:1714003200:n-def456",
+        "signature_b64": "iDbUbCOfuzXD8b+xcARDtUjYBgYQOHFCFzxnk0Eez0M33mirkaJwfU1km/IsRwGeAWFsXAQXxKIkfm64v9ELCg=="
+      }
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      smb_funnel — the 3-click SMB onboarding funnel.
+      Static page, no build step. Serve this directory with any static server:
+        python3 -m http.server 8700
+      then open http://localhost:8700. Runs against the in-page MOCK by default.
+      Point at a real host: edit src/config.js (API_BASE), or set
+      localStorage["smb_funnel.api_base"] in the browser.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http: https:; base-uri 'none'; form-action 'none'"
+    />
+    <title>Get your business discoverable by AI agents · NANDA</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="stage">
+      <header class="top">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">NANDA</span>
+          <span class="brand-sub">for business</span>
+        </div>
+        <span id="env-badge" class="env-badge" title="Which backend the funnel is talking to">mock</span>
+      </header>
+
+      <main class="funnel">
+        <!-- ── Screen 1: the ask ─────────────────────────────────────── -->
+        <section id="screen-form" class="screen" aria-labelledby="form-title">
+          <p class="eyebrow">Your own agent identity in under a minute</p>
+          <h1 id="form-title">Get your business its own<br /><span class="grad">AI agent</span>.</h1>
+          <p class="lede">
+            Your own AI agent with its own did:key, taking bookings that come back as
+            receipts anyone can check the signature on — ready to register on NANDA.
+            No code. No setup call.
+          </p>
+
+          <form id="funnel-form" class="card form-card" novalidate>
+            <label class="field">
+              <span class="field-label">Business name</span>
+              <input
+                id="business-name"
+                type="text"
+                name="business_name"
+                placeholder="e.g. Fadeaway Barbershop"
+                autocomplete="organization"
+                spellcheck="false"
+                required
+                data-autofocus
+              />
+            </label>
+            <label class="field">
+              <span class="field-label">What do you do?</span>
+              <input
+                id="service-type"
+                type="text"
+                name="service_type"
+                placeholder="e.g. Haircuts &amp; hot-towel shaves"
+                autocomplete="off"
+              />
+              <span class="field-hint">One line. This is how other agents will describe you.</span>
+            </label>
+            <label class="field">
+              <span class="field-label">Where should bookings go?</span>
+              <input
+                id="contact"
+                type="text"
+                name="contact"
+                placeholder="you@yourshop.com, or an https:// webhook"
+                autocomplete="email"
+                spellcheck="false"
+                required
+              />
+              <span class="field-hint">
+                Required. This is where your agent sends a booking it takes, and every
+                booking says whether it got there — without it your agent would accept
+                appointments you never see.
+              </span>
+            </label>
+            <div id="form-error" class="error" role="alert" hidden></div>
+            <button type="submit" class="btn btn-primary btn-lg">
+              Create my agent
+              <span class="btn-arrow" aria-hidden="true">→</span>
+            </button>
+            <p class="reassure">Free to start · No credit card · You leave with a recovery phrase.</p>
+          </form>
+
+          <ul class="trust-row" aria-label="What you get">
+            <li><strong>Sovereign</strong><span>your own did:key + agent card</span></li>
+            <li><strong>Verifiable</strong><span>bookings receipted, signed with your did:key</span></li>
+            <li><strong>Bookable</strong><span>agent-to-agent appointments</span></li>
+          </ul>
+        </section>
+
+        <!-- ── Screen 2: provisioning ────────────────────────────────── -->
+        <section id="screen-creating" class="screen center" aria-labelledby="creating-title" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <h2 id="creating-title">Creating your agent…</h2>
+          <p class="lede">Provisioning <strong id="creating-name">your business</strong>'s agent.</p>
+          <ol id="creating-steps" class="steps">
+            <li>Minting a sovereign identity (did:key)</li>
+            <li>Provisioning your tenant agent</li>
+            <li>Serving your agent card</li>
+          </ol>
+        </section>
+
+        <!-- ── Screen 3: live ────────────────────────────────────────── -->
+        <section id="screen-live" class="screen" aria-labelledby="live-title" hidden>
+          <div class="live-hero">
+            <span class="live-check" aria-hidden="true">✓</span>
+            <p class="eyebrow ok">Agent provisioned</p>
+            <h2 id="live-title"><span id="live-name">Your business</span> has a sovereign agent identity.</h2>
+            <p class="live-sub">Ready to register on NANDA — that final step is handled by host39.</p>
+          </div>
+
+          <div class="card detail-card">
+            <div class="detail">
+              <div class="detail-label">Agent card <span class="detail-note">(the card your host serves)</span></div>
+              <div class="detail-row">
+                <!--
+                  A code element, not an anchor: the card URL is displayed and
+                  copied, never navigated, in the same shape as the Endpoint and
+                  Identity fields below. This was an anchor whose href was
+                  assigned from the /provision response. See src/app.js.
+                -->
+                <code id="card-link" class="mono"></code>
+                <button class="btn btn-ghost btn-copy" data-copy="#card-link" type="button">Copy</button>
+              </div>
+            </div>
+
+            <div class="detail">
+              <div class="detail-label">Endpoint</div>
+              <div class="detail-row">
+                <code id="endpoint" class="mono"></code>
+                <button class="btn btn-ghost btn-copy" data-copy="#endpoint" type="button">Copy</button>
+              </div>
+            </div>
+
+            <div class="detail">
+              <div class="detail-label">Identity (did:key)</div>
+              <div class="detail-row">
+                <code id="did" class="mono"></code>
+                <button class="btn btn-ghost btn-copy" data-copy="#did" type="button">Copy</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recovery phrase — shown once, must be written down. -->
+          <div class="card recovery-card">
+            <div class="recovery-warn">
+              <span class="warn-icon" aria-hidden="true">⚠</span>
+              <div>
+                <strong>Write this down now. Shown once.</strong>
+                <p>Your recovery phrase is the only way to restore control of your agent. We never store it — if you lose it, it's gone.</p>
+              </div>
+            </div>
+            <div id="recovery-phrase" class="phrase" aria-label="Recovery phrase"></div>
+            <button class="btn btn-ghost btn-copy" data-copy="#recovery-phrase" type="button">Copy phrase</button>
+          </div>
+
+          <!-- Try it: agent-to-agent booking → verifiable receipt. -->
+          <div class="card try-card">
+            <h3>See it work</h3>
+            <p class="try-lede">Send your new agent a booking, the way another agent on NANDA would.</p>
+            <button id="try-btn" class="btn btn-primary" type="button">Try it — book an appointment</button>
+            <div id="try-result" class="try-result" hidden></div>
+          </div>
+
+          <button id="restart" class="btn btn-text" type="button">Start over</button>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <span>Powered by <strong>NANDA</strong> · the open agent-discovery network</span>
+      </footer>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

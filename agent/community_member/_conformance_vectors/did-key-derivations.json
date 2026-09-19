@@ -1,0 +1,53 @@
+{
+  "spec_version": "0.2",
+  "spec_ref": "spec/0.2/did-key.md",
+  "description": "Ed25519 public key (32 bytes) -> did:key. Multibase 'z' (base58btc) over multicodec 0xed01 || pubkey. Expected values computed by orrery's spec_reference adapter (the executable spec).",
+  "cases": [
+    {
+      "id": "project-vector-1",
+      "description": "Reference vector \u2014 valid Ed25519 public key.",
+      "input": {
+        "pubkey32_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+      },
+      "expected": {
+        "prefixed_hex": "ed01d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        "did_key": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw"
+      }
+    },
+    {
+      "id": "project-vector-2",
+      "description": "Different leading-byte distribution.",
+      "input": {
+        "pubkey32_hex": "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"
+      },
+      "expected": {
+        "prefixed_hex": "ed013b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
+        "did_key": "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp"
+      }
+    },
+    {
+      "id": "all-zeros-pubkey",
+      "description": "Edge case \u2014 all-zero pubkey (catches encoding-direction bugs).",
+      "input": {
+        "pubkey32_hex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "prefixed_hex": "ed010000000000000000000000000000000000000000000000000000000000000000",
+        "did_key": "did:key:z6MkeTG3bFFSLYVU7VqhgZxqr6YzpaGrQtFMh1uvqGy1vDnP"
+      }
+    }
+  ],
+  "adversarial_cases": [
+    {
+      "id": "DRIFT-base64url-not-base58btc",
+      "description": "Encoding the prefixed pubkey as base64url instead of base58btc yields a different, NON-conforming did:key for the same input.",
+      "input": {
+        "pubkey32_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+      },
+      "expected": {
+        "conforming_did_key": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+        "must_not_equal": "did:key:z7QHXWpgBgrEKt9VL_tPJZAc6DuFy89qmIyWvAhpo9wdRGg"
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+# Lean Index image — the NEST-compatible corroboration registry for the
+# cross-registry divergence detector. Build context is the REPO ROOT
+# (parity with Dockerfile.server): docker build -f infra/Dockerfile.index .
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# M14: install from a fully-resolved, hash-pinned lock rather than inline ranges.
+# --require-hashes makes pip refuse any artifact the lock did not name, so a
+# build of this commit installs the same tree today and in six months.
+COPY index/requirements.lock /app/index-requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r /app/index-requirements.lock
+
+COPY index/ /app/index/
+
+WORKDIR /app/index
+ENV PORT=7100 \
+    INDEX_DB_PATH=/data/index.db
+
+EXPOSE 7100
+HEALTHCHECK --interval=15s --timeout=5s --retries=20 \
+  CMD curl -fsS "http://localhost:${PORT:-7100}/health" || exit 1
+
+RUN groupadd --gid 10001 orrery \
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin orrery
+USER orrery
+
+CMD ["python", "main.py"]

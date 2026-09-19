@@ -1,0 +1,20 @@
+Orrery
+Copyright (c) 2026 Stellarminds.ai
+
+Licensed under the MIT License; see LICENSE.
+
+Orrery depends on the sm-* trust primitives (sm-arp, sm-conformance, and
+others), which are distributed separately, also under the MIT License.
+
+Third-party material carried in this repository:
+
+- server/nanda_models.py — models written against the NANDA AgentFacts
+  schema, https://github.com/projnanda/agentfacts-format (MIT License, as
+  stated in that repository's README).
+- agent/community_member/a2a_*.py — an implementation of the Agent-to-Agent
+  (A2A) protocol specification, https://github.com/a2aproject/A2A
+  (specification licensed Apache-2.0; no code copied).
+- CODE_OF_CONDUCT.md — adapted from the Contributor Covenant, version 2.1,
+  https://www.contributor-covenant.org (CC BY 4.0).
+
+Every runtime dependency and its license is listed in docs/LICENSES.md.

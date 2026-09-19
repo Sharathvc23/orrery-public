@@ -1,0 +1,40 @@
+{
+  "agent_name": "bayarea-nanda-chapter",
+  "label": "@bayarea NANDA Chapter",
+  "description": "Community hub for the SF Bay Area NANDA chapter. Answers chapter questions, manages a member agent registry, and routes messages to member agents.",
+  "version": "2.0",
+  "provider": {
+    "name": "Bay Area NANDA Chapter",
+    "url": "https://projectnanda.org"
+  },
+  "skills": [
+    {
+      "id": "community-knowledge",
+      "description": "Answer questions about Bay Area chapter members, resources, events, and focus areas",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "member-matching",
+      "description": "Match people to collaborators based on skills, interests, and availability",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "member-registry",
+      "description": "Register and discover member agents within this chapter via /api/members and /nanda/index",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "message-routing",
+      "description": "Route @agent-id messages to registered member agents",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    }
+  ],
+  "capabilities": {
+    "modalities": ["text"],
+    "streaming": false
+  }
+}

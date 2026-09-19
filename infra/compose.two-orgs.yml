@@ -1,0 +1,39 @@
+# A second, separately administered org beside the first.
+#
+#   docker compose -f docker-compose.yml -f infra/compose.two-orgs.yml up -d --build
+#
+# Adds `server2`: its own identity (ORG_TWO_ID / ORG_TWO_NAME → its own did:web),
+# its own signing key and admin token, published on its own port
+# (ORG_TWO_PORT), and NO federation wiring to the first org — the two do not
+# know each other. This is the shape scripts/demo_two_agents.sh uses so that
+# the two agents it stands up belong to two different orgs.
+#
+# `server2` runs db-less, the degraded mode the server explicitly supports:
+# it registers members and serves their cards, but records no receipts and
+# signs no checkpoint. The demo's receipt goes to the ISSUER's org (the first,
+# which has the database), which is where a pushed receipt lands anyway.
+# Signed-federation enforcement stays ON, as in the shipped defaults.
+services:
+  server2:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.server
+    environment:
+      AGENT_ID: ${ORG_TWO_ID:-second-org}
+      AGENT_NAME: ${ORG_TWO_NAME:-Second Org}
+      AGENT_DESCRIPTION: A second, separately administered org.
+      PORT: "7000"
+      PUBLIC_URL: http://localhost:${ORG_TWO_PORT:-7001}
+      ORRERY_PROFILE: ${ORRERY_PROFILE:-prod}
+      FEDERATION_AUTODISCOVER: "false"
+      FEDERATION_ENFORCE_SIGNED_BROADCASTS: "true"
+      FEDERATION_REQUIRE_SIGNED_RECORDS: "true"
+      AUTO_REGISTER: "false"
+      REGISTRY_URL: ""
+      # Defined from scratch, so nothing is inherited from the base service.
+      # Sealing is required; without this it refuses to start.
+      ORRERY_KEY_SECRET: ${ORRERY_KEY_SECRET:-}
+      ORRERY_REQUIRE_SEALED_SECRETS: ${ORRERY_REQUIRE_SEALED_SECRETS:-true}
+    ports:
+      - "${SERVER_BIND_HOST:-127.0.0.1}:${ORG_TWO_PORT:-7001}:7000"
+    restart: unless-stopped

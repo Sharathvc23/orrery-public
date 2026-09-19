@@ -1,0 +1,93 @@
+# Capability grants for a local agent — EXAMPLE, NOT ACTIVE.
+#
+# The agent reads ~/.community-member/grants.policy. This file is not that
+# file and is never loaded. Copy it, delete everything you do not need, and
+# uncomment only what this install is for:
+#
+#     cp grants.policy.example ~/.community-member/grants.policy
+#
+# With no grants.policy, every file, shell, network, browser and desktop action
+# is refused. That is the default and it is a working state: the agent still
+# serves its card, answers signed requests, drains its inbox and runs its
+# deterministic skills. Grant only what this install needs to do.
+#
+# Every line below is commented out. A grants file is not a checklist to
+# complete — an install that needs none of these should have none of them.
+#
+# The agent reports a refused action with the exact grant line that would have
+# permitted it, so the shortest way to build this file is to run the agent and
+# add lines as it tells you what it wanted.
+
+# ── How arguments are bounded, per capability ─────────────────────────
+#
+#   fs.*              path globs. ~ expands, ** spans directories.
+#   net.http          hostnames. *.example.com needs at least one label.
+#   browser.*         ORIGINS. Scheme required and exact; port defaults
+#                     from the scheme.
+#   shell.exec        BINARY NAMES ONLY. Read the next section.
+#   desktop.*         target names.
+
+# ── The one thing to read before granting a shell binary ──────────────
+#
+# shell.exec says WHICH BINARY may run. The agent narrows one shape of
+# argument — one naming an existing file outside your fs.* grants — and
+# nothing else. A binary that takes a URL, or a path written inside a program
+# it interprets, is not bounded by the patterns you wrote elsewhere:
+#
+#     fs.read:~/Downloads/**      <- looks like "only Downloads"
+#     shell.exec:awk              <- reads any file, if the path is in the program
+#
+#   awk '{print}' /etc/shadow            names the path as an argument: refused.
+#   awk 'BEGIN{getline l < "/etc/shadow"}'   puts it inside the program: runs.
+#
+# Same binary, same grants, opposite outcomes. The narrowing reads arguments,
+# not what a binary does with them. The same escape exists for curl and wget
+# (a host is not a path), for tee and cp writing files that do not exist yet,
+# and for sh, bash, python, node, env, xargs and find, which run other binaries
+# and so subsume the binary allowlist itself.
+#
+# The agent prints a warning at startup naming any such grant. Prefer a binary
+# that does one job. If you need a general one, grant it deliberately and know
+# that it is the widest line in your file.
+
+# ── Files ─────────────────────────────────────────────────────────────
+# Read a directory you drop work into. Prefer the narrowest path that works.
+# fs.read:~/Downloads/agent/**
+
+# Write only where the agent's own output belongs — never a source tree, a
+# config directory, or anywhere you would not want a file replaced.
+# fs.write:~/Documents/agent-output/*.md
+
+# ── Network ───────────────────────────────────────────────────────────
+# One hostname per service the agent actually calls. A leading *. covers
+# subdomains and not the parent, so *.example.com does not include
+# example.com.
+# net.http:api.example.com
+
+# ── Browser ───────────────────────────────────────────────────────────
+# Origins, with the scheme. Browser navigation uses a persistent profile that
+# holds the agent's cookies, so granting http:// puts them on the wire in
+# clear. Grant https:// unless you have a reason not to.
+# browser.navigate:https://docs.example.com
+# browser.navigate:https://*.wikipedia.org
+
+# ── Shell ─────────────────────────────────────────────────────────────
+# This section suggests nothing, and that is not an oversight.
+#
+# The narrowing above reaches one shape of argument and nothing else, so
+# there is still no binary that can be recommended as the narrow choice. git looks like one — it is about
+# repositories, not about arbitrary paths — and it is not: a config alias,
+# core.pager, core.sshCommand or a repository hook each run any command you
+# like. The same is true of make, tar, docker and every editor with a shell
+# escape. Any suggestion here would be read as a vetted default, and there is
+# no default that is safe to hand out.
+#
+# The agent warns about the binaries it knows subsume another capability, and
+# it does NOT know them all. A grant it says nothing about has not been
+# assessed. Every shell.exec line is the widest line in your policy.
+#
+# So: write one only if you know what that binary can be made to do with
+# arguments you did not choose, and prefer solving the problem without a shell
+# grant at all.
+#
+# shell.exec:<binary>

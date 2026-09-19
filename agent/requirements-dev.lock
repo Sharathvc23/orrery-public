@@ -1,0 +1,19 @@
+# Development tooling for the agent — the test runner, the linter, the type
+# checker and their own dependencies. Exact pins, resolved together with
+# requirements.lock so both files install into one environment without a
+# conflict. NOT installed into the agent image or by `./orrery-up`: these used
+# to sit in requirements.lock and shipped pytest, mypy and ruff into every
+# running agent. CI installs this file after requirements.lock wherever it runs
+# the agent's tests; nothing here is imported by community_member at runtime.
+ast_serialize==0.6.0
+coverage==7.15.0
+iniconfig==2.3.0
+librt==0.13.0
+mypy==2.2.0
+mypy_extensions==1.1.0
+pathspec==1.1.1
+pluggy==1.6.0
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+pytest==9.1.1
+ruff==0.15.21

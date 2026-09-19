@@ -1,0 +1,64 @@
+{
+  "spec_version": "0.2",
+  "spec_ref": "spec/0.2/signing.md#canonical-string",
+  "description": "(body, agent_id, timestamp) -> canonical string `body:agent_id:timestamp` for Ed25519 signing. Expected computed by orrery's spec_reference. The signing_key/public_key + signature let an adapter prove a real sign/verify roundtrip.",
+  "signing_key": {
+    "private_key32_hex": "ec992cffb9e65c29fd5a4abd5f60cff54300f643060aff67f8562fe1ca9dea4a",
+    "public_key32_hex": "97f12b3b5a6ffa2aef93034fb56b5d70b1daf23c4e4e058a0281545052e35384",
+    "did_key": "did:key:z6MkpgNu5sYn7qbWuGJ5UjpWBW9KLGupYcycfgfH71HFrNTd"
+  },
+  "cases": [
+    {
+      "id": "register-openclaw-typical",
+      "description": "Typical register body, signed verbatim.",
+      "input": {
+        "body": "{\"agent_id\":\"alice\",\"name\":\"Alice\",\"origin\":\"openclaw\"}",
+        "agent_id": "alice",
+        "timestamp": "1714003200"
+      },
+      "expected": {
+        "canonical_string": "{\"agent_id\":\"alice\",\"name\":\"Alice\",\"origin\":\"openclaw\"}:alice:1714003200",
+        "signature_b64": "+JhyRGO6sECL24eWJE++nIlgN3OIaoJxVnqAoTvxwWCmmLvnrzG/qe9XMIuKbefweLjgm8VsCgskvb0zJC0DCA=="
+      }
+    },
+    {
+      "id": "intent-submit",
+      "description": "Body with embedded colons \u2014 canonical is positional, not colon-delimited.",
+      "input": {
+        "body": "{\"intent\":\"need a co-founder: ML, 0->1\"}",
+        "agent_id": "alice",
+        "timestamp": "1714003200"
+      },
+      "expected": {
+        "canonical_string": "{\"intent\":\"need a co-founder: ML, 0->1\"}:alice:1714003200",
+        "signature_b64": "s50Ow7b9RDLP48yH4XW/96M9WnqIUivap/ejlyaiBCkWD8F3pjIVgdznTu0gLAl8Cueq+1ZtPTuSBhjP6oW5BQ=="
+      }
+    },
+    {
+      "id": "empty-body",
+      "description": "Empty body signs the empty string.",
+      "input": {
+        "body": "",
+        "agent_id": "alice",
+        "timestamp": "1714003200"
+      },
+      "expected": {
+        "canonical_string": ":alice:1714003200",
+        "signature_b64": "jucNB7az04kr4qECJyBNl8JSbd/z8Scwf9n7UPfeeQINeiP1GM/belihh2T9tlC92w8Jm1o+U2L6GbzlfBiBBA=="
+      }
+    },
+    {
+      "id": "unicode-body",
+      "description": "Non-ASCII body bytes are signed as-is.",
+      "input": {
+        "body": "{\"note\":\"caf\u00e9 \u2615 \u00fcberpr\u00fcfung\"}",
+        "agent_id": "bob",
+        "timestamp": "1714003500"
+      },
+      "expected": {
+        "canonical_string": "{\"note\":\"caf\u00e9 \u2615 \u00fcberpr\u00fcfung\"}:bob:1714003500",
+        "signature_b64": "RFQfINZnQf6/UJnir6W/GxEX33ZrTJX8bv9e02RMses7rboGCdwzt1BpAf8wNpxc9CGkwEFWe6/syBIwR6k3Cw=="
+      }
+    }
+  ]
+}

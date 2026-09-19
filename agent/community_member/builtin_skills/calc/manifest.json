@@ -1,0 +1,7 @@
+{
+  "name": "calc",
+  "version": "1.0.0",
+  "description": "Evaluate an arithmetic expression. No capabilities required.",
+  "capabilities": [],
+  "builtin": true
+}

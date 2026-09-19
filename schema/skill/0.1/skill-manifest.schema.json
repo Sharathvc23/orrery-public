@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Sharathvc23/orrery/schema/skill/0.1/skill-manifest.schema.json",
+  "title": "NANDA Skill Manifest v0.1",
+  "description": "Metadata for a NANDA chapter skill. A NANDA skill is a SIGNED, EXECUTABLE capability package: the registry binds this manifest to package bytes via a content sha256 and an Ed25519 signature (carried out-of-band at publish time, not in this manifest), and the member runtime sandboxes execution by `capabilities`. The fields beyond name/version/capabilities are an additive, declarative superset that makes the same skill expressible in the open Agent-Skills ecosystem (generic agents / Claude Agent Skills / MCP / NANDA AgentFacts) — they enrich discovery and safety review but never relax the signing or capability gate. All of them are optional, so older manifests validate unchanged.",
+  "type": "object",
+  "required": ["name", "version"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Lowercase handle, unique per (name, version).",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "description": { "type": "string", "maxLength": 1000 },
+    "readme_markdown": { "type": "string", "description": "Long-form instructions (the open format's SKILL.md equivalent)." },
+    "author_did": { "type": "string", "description": "did:key of the author; defaults to the signing key at publish time." },
+    "capabilities": {
+      "type": "array",
+      "description": "CANONICAL execution contract — the sandbox gates the package by these. e.g. fs.read, net.http, shell.exec. High-risk caps (shell.exec, net.arbitrary, fs.any, eval.code) render with warnings.",
+      "maxItems": 32,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$" },
+      "uniqueItems": true
+    },
+    "category": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "use_cases": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+    "inputs": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/namedDescription" } },
+    "outputs": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/namedDescription" } },
+    "required_tools": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+    "permissions": {
+      "type": "object",
+      "description": "Coarse declarative permissions that complement `capabilities` (which remain the executable gate).",
+      "properties": {
+        "network": { "type": "boolean" },
+        "filesystem": { "type": "boolean" },
+        "code_execution": { "type": "boolean" },
+        "external_api": { "type": "boolean" },
+        "user_data_access": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "safety_level": { "type": "string", "enum": ["low", "medium", "high"] },
+    "risk_tags": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+    "compatibility": {
+      "type": "object",
+      "description": "Which agent ecosystems this skill is known to work with.",
+      "properties": {
+        "generic_agents": { "$ref": "#/$defs/compatibilityStatus" },
+        "claude_skills": { "$ref": "#/$defs/compatibilityStatus" },
+        "chatgpt_skills": { "$ref": "#/$defs/compatibilityStatus" },
+        "mcp": { "$ref": "#/$defs/compatibilityStatus" },
+        "nanda_agentfacts": { "$ref": "#/$defs/compatibilityStatus" }
+      },
+      "additionalProperties": false
+    },
+    "license": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "maintainers": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "contact": { "type": "string" }
+        }
+      }
+    },
+    "tests": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 200 } }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "compatibilityStatus": { "type": "string", "enum": ["supported", "experimental", "not_supported", "unknown"] },
+    "namedDescription": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

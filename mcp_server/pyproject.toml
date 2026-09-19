@@ -1,0 +1,59 @@
+[project]
+name = "orrery-mcp-server"
+version = "0.1.0"
+description = "Accountability primitives (identity, consent, receipts, peer resolution) exposed as MCP tools over stdio. Exposes no reasoning, planning, or generation — that stays in the caller's own framework."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sharath Chandra", email = "sharath@komputix.com" }]
+keywords = ["agents", "nanda", "mcp", "model-context-protocol", "accountability", "did:key"]
+# THIS PACKAGE IS NOT INSTALLABLE AND IS NOT MEANT TO BE, same shape as
+# smb_host/pyproject.toml: two flat modules with no build backend. This file
+# exists for dependency declaration, lint config and test config.
+#
+# It depends on the installed `community_member` package (orrery-agent) for
+# identity, the consent gate, ARP receipts, and NANDA Index resolution — every
+# tool here wraps an existing function there; see tools.py's module docstring.
+dependencies = [
+    "orrery-agent",
+    # ⚠️ PINNED BELOW 2.0, MEASURED RATHER THAN ASSUMED: mcp 2.1.1 is the
+    # latest release on PyPI, but langchain-mcp-adapters 0.3.2 (the oracle
+    # this package's own tests are required to be driven by — see
+    # test_langchain_oracle.py) depends on `mcp<2.0.0,>=1.24.0`. Pinning this
+    # package to the newest mcp would make it impossible to install alongside
+    # the client library that proves the "a LangChain agent can drive this"
+    # claim. Revisit when langchain-mcp-adapters raises its own ceiling.
+    "mcp>=1.24.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "langchain-mcp-adapters>=0.3.0,<0.4",
+    "ruff>=0.15",
+    "mypy>=1.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/Sharathvc23/orrery"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+# mypy: strict on the two modules that are ours; community_member has no
+# py.typed marker so its imports resolve as untyped (Any) with the flag below,
+# same convention smb_host/pyproject.toml uses.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+files = ["server.py", "tools.py"]

@@ -1,0 +1,1365 @@
+#!/usr/bin/env python3
+"""orrery-up — one-command bootstrap: a running org + joined agent.
+
+    ./orrery-up            interactive where a choice is real, else defaults
+    ./orrery-up --yes      fully non-interactive (CI / scripting)
+    ./orrery-up down       stop the stack (add --purge to also drop volumes)
+    ./orrery-up status     sign-of-life probes against a running stack
+    ./orrery-up --selftest internal unit checks (no Docker needed)
+
+What it does, in order: prerequisite checks (actionable messages) → generate
+`.env` with FRESH per-install secrets (the shipped demo password is never
+used — S3) → `docker compose --profile agent --profile ui up -d --build` (org + one local
+agent + the reference renderer; the agent joins the org at startup) →
+sign-of-life drill (/health, boot conformance badge, /health again for the
+joined agent counted as a member, agent card served) → a banner of URLs, every one of them
+requested anonymously before it is printed, ending in the renderer address
+that paints the org's dashboard in a browser.
+
+Every process this installer starts belongs to Compose — the org, the first
+agent and the renderer alike — so `./orrery-up down` stops all of them.
+
+Design rules: stdlib only (runs before any venv exists); idempotent re-runs
+(existing .env and running services are kept, missing secrets are added);
+no telemetry, no network beyond Docker and configured local bind addresses; an LLM key is OPTIONAL
+and provider-agnostic — skipping it yields a complete, working keyless
+install (add AGENT_PROVIDER/AGENT_API_KEY/AGENT_MODEL to .env later to turn
+generative features on; anthropic/openai/xai/groq/local are all first-class).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from urllib.parse import urlsplit
+
+REPO = Path(__file__).resolve().parent
+ENV_PATH = REPO / ".env"
+DEMO_PG_PASSWORD = (
+    "orrery-dev-password-change-me"  # shipped placeholder — never installed
+)
+
+# The profiles a full local install runs: the org (default), the first local
+# agent, and the reference renderer. Named once because five call sites used to
+# spell `--profile agent` out, and a service in a profile the teardown does not
+# name is a container `down` walks past.
+PROFILES = ("--profile", "agent", "--profile", "ui")
+
+OK = "\033[32m✓\033[0m"
+BAD = "\033[31m✗\033[0m"
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def say(msg: str) -> None:
+    print(f"[orrery-up] {msg}", flush=True)
+
+
+def die(msg: str, *hints: str) -> "None":
+    print(f"[orrery-up] {BAD} {msg}", file=sys.stderr)
+    for h in hints:
+        print(f"            → {h}", file=sys.stderr)
+    sys.exit(1)
+
+
+# ── prerequisites ─────────────────────────────────────────────────────────
+
+
+def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def preflight() -> None:
+    if sys.version_info < (3, 10):
+        die(
+            f"Python 3.10+ required (you have {sys.version.split()[0]})",
+            "install a newer Python and re-run",
+        )
+    if shutil.which("docker") is None:
+        die(
+            "Docker not found on PATH",
+            "install Docker: https://docs.docker.com/get-docker/",
+        )
+    if _run(["docker", "info"]).returncode != 0:
+        die(
+            "Docker is installed but the daemon isn't reachable",
+            "start Docker Desktop / `sudo systemctl start docker`, then re-run",
+        )
+    if _run(["docker", "compose", "version"]).returncode != 0:
+        die(
+            "`docker compose` (v2 plugin) not available",
+            "install the Compose plugin: https://docs.docker.com/compose/install/",
+        )
+    say(
+        f"{OK} prerequisites: python {sys.version.split()[0]}, docker + compose reachable"
+    )
+
+
+def _bind_host(bind_host: str) -> str:
+    host = bind_host.strip()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host or "127.0.0.1"
+
+
+def _probe_host(bind_host: str) -> str:
+    """Return an address this host can use to reach a published container port."""
+    host = _bind_host(bind_host)
+    if host == "0.0.0.0":
+        return "127.0.0.1"
+    if host == "::":
+        return "::1"
+    return host
+
+
+def _service_origin(env: dict[str, str], service: str, default_port: str) -> str:
+    host = _probe_host(env.get(f"{service}_BIND_HOST", "127.0.0.1"))
+    port = env.get(f"{service}_PORT", default_port)
+    url_host = f"[{host}]" if ":" in host else host
+    return f"http://{url_host}:{port}"
+
+
+def _local_probe_env(env: dict[str, str]) -> dict[str, str]:
+    process_env = os.environ.copy()
+    hosts = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        _probe_host(env.get("SERVER_BIND_HOST", "127.0.0.1")),
+        _probe_host(env.get("AGENT_BIND_HOST", "127.0.0.1")),
+    ]
+    existing = process_env.get("NO_PROXY") or process_env.get("no_proxy", "")
+    no_proxy = ",".join(dict.fromkeys([*filter(None, existing.split(",")), *hosts]))
+    process_env["NO_PROXY"] = no_proxy
+    process_env["no_proxy"] = no_proxy
+    return process_env
+
+
+# (service, description, bind-host key, port key, default, flag). One table,
+# read by port resolution, by the checks, and by the .env the install pins.
+SERVICE_PORTS = (
+    ("server", "org server", "SERVER_BIND_HOST", "SERVER_PORT", 7000, "--server-port"),
+    ("agent", "agent", "AGENT_BIND_HOST", "AGENT_PORT", 8080, "--agent-port"),
+    (
+        "renderer",
+        "reference renderer",
+        "RENDERER_BIND_HOST",
+        "RENDERER_PORT",
+        8600,
+        "--renderer-port",
+    ),
+)
+# How far above the default to look before giving up. Bounded so a machine with
+# a genuinely exhausted range fails with a message rather than scanning forever.
+PORT_SEARCH_SPAN = 200
+
+# ── PUBLIC_URL is a projection of SERVER_PORT, not a second copy of it ─────
+#
+# The org's public origin is ONE fact that `.env` spells twice: SERVER_PORT is
+# the host port Compose publishes, PUBLIC_URL is the origin the org writes into
+# its did:web and every endpoint in its AgentFacts. Two spellings that are kept
+# in step by hand will disagree — an operator who edits SERVER_PORT and leaves
+# PUBLIC_URL has an org that PUBLISHES one port and LISTENS on another, and
+# nothing in the stack notices, because each half reads only its own key.
+#
+# So the installer owns the coupling. A PUBLIC_URL of the shape the installer
+# writes — http, a loopback host, an explicit port — is a projection of
+# SERVER_PORT and follows it on every run. Any other shape (a real hostname,
+# https, no port at all) names an origin the operator owns, typically a proxy
+# in front of the container, and the installer cannot know what port that proxy
+# forwards to; it is never rewritten and never judged.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def public_url_for(port: int) -> str:
+    """The PUBLIC_URL a fresh install writes for a server on `port`."""
+    return f"http://localhost:{port}"
+
+
+def public_url_follows_port(url: str) -> bool:
+    """True iff `url` is the installer's own shape and therefore a projection
+    of SERVER_PORT: http, a loopback host, an explicit port. False for any
+    origin the operator named — those are theirs, not the installer's."""
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except ValueError:
+        return False
+    return (
+        parts.scheme == "http"
+        and (parts.hostname or "").lower() in LOOPBACK_HOSTS
+        and port is not None
+    )
+
+
+def _public_url_with_port(url: str, port: int) -> str:
+    """`url` with its explicit port replaced and everything else — the host as
+    the operator spelled it, any path — left as written."""
+    parts = urlsplit(url.strip())
+    netloc = parts.netloc.rsplit(":", 1)[0] + f":{port}"
+    return parts._replace(netloc=netloc).geturl()
+
+
+def rewrite_env(text: str, updates: dict[str, str]) -> str:
+    """`text` with the value of each key in `updates` replaced IN PLACE.
+
+    The last uncommented `KEY=` line is the one rewritten — that is the one
+    `parse_env` (and Compose) honour when a key appears twice. Every other byte
+    of the file, comments and ordering included, is left exactly as it was.
+    A key that is not present is a caller error, not something to append here.
+    """
+    lines = text.split("\n")
+    for key, value in updates.items():
+        hits = [
+            i
+            for i, line in enumerate(lines)
+            if not line.lstrip().startswith("#")
+            and line.partition("=")[0].strip() == key
+        ]
+        if not hits:
+            raise KeyError(key)
+        lines[hits[-1]] = f"{key}={value}"
+    return "\n".join(lines)
+
+
+def _bindable(host: str, port: int) -> bool:
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            s.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
+def _allocate(
+    host: str, preferred: int, claimed: set[int], what: str, flag: str
+) -> int:
+    """The first bindable port at or above `preferred`, skipping any already
+    claimed by another service in this same resolution."""
+    for port in range(preferred, preferred + PORT_SEARCH_SPAN):
+        if port not in claimed and _bindable(host, port):
+            return port
+    die(
+        f"no free port for the {what} in {preferred}–{preferred + PORT_SEARCH_SPAN - 1}",
+        f"free one, or name it yourself: ./orrery-up {flag} <port>",
+    )
+    raise AssertionError  # unreachable
+
+
+def resolve_ports(args, env: dict[str, str]) -> list[dict]:
+    """Decide the port for each service, and record WHY it was chosen.
+
+    Three sources, in strict precedence, and the precedence is the design:
+
+      flag       an operator named it. That port or nothing — a collision is a
+                 refusal, because silently moving a port someone asked for by
+                 name answers a different question than the one they asked.
+      pinned     `.env` already carries it, so a previous run chose it and the
+                 org has been publishing it ever since. Reused unconditionally.
+      allocated  nothing has chosen yet: take the first bindable port at or
+                 above the default. A first run on a developer machine that is
+                 already serving something should not fail on a collision.
+
+    ⚠️ ALLOCATE ONCE, THEN PIN — THE ORG'S IDENTITY EMBEDS THE PORT. The org
+    publishes `did:web:localhost:<port>:agents:<org id>` and every endpoint in
+    its AgentFacts under the same origin (`resolve_public_url()` in
+    server/chapter_agent.py falls back to `http://localhost:{PORT}` and
+    `PUBLIC_URL` is written from the resolved port here). A port re-rolled on
+    every run would move the org's identity on every run — a regression wearing
+    a convenience's clothes. So the choice is written to `.env` on first run and
+    read back from it forever after, exactly as the generated secrets are.
+
+    Note the asymmetry, because testing the wrong half proves nothing: the
+    AGENT's did:key is derived from its keypair and survives anything. The
+    ORG's did:web is derived from host and port and does not.
+    """
+    claimed: set[int] = set()
+    resolved: list[dict] = []
+    for service, what, host_key, port_key, default, flag in SERVICE_PORTS:
+        host = _bind_host(env.get(host_key, "127.0.0.1"))
+        named = getattr(args, flag.lstrip("-").replace("-", "_"), None)
+        pinned = env.get(port_key)
+        if named is not None:
+            port, source = int(named), "flag"
+        elif pinned:
+            port, source = int(pinned), "pinned"
+        else:
+            port, source = _allocate(host, default, claimed, what, flag), "allocated"
+        claimed.add(port)
+        resolved.append(
+            {
+                "service": service,
+                "what": what,
+                "host": host,
+                "port": port,
+                "source": source,
+                "flag": flag,
+                "default": default,
+                "key": port_key,
+                # What `.env` held when this was resolved — i.e. the port a
+                # currently-running stack was started on. `check_ports` needs it
+                # to tell "we already own this address" from "this is a new
+                # address the running stack does not hold".
+                "running_port": pinned,
+            }
+        )
+    return resolved
+
+
+def check_ports(resolved: list[dict]) -> None:
+    """Refuse only where the port was not this function's to choose.
+
+    An ALLOCATED port was bound-tested to find it, so it needs no second
+    verdict. A FLAG or a PINNED port was handed to us, and if it is taken the
+    honest answer is to say so rather than quietly use a different one — for a
+    flag because the operator named it, and for a pinned port because the org's
+    published identity is already built on it and moving it would rename the
+    org rather than relocate it.
+
+    A running stack already binds the addresses it was started on and compose
+    reconciles those itself, so they are skipped — but ONLY those.
+
+    ⚠️ "The service is running" is NOT the same as "we hold this port", and
+    conflating them let a real defect through: with the stack up on 7001,
+    `./orrery-up --server-port 7000` was accepted while 7000 was held by an
+    unrelated process, because the skip matched on the service name alone. The
+    operator would have been told nothing and compose would have failed to
+    publish. The skip therefore matches the ADDRESS the running stack holds,
+    which is the one `.env` pinned when this was resolved.
+    """
+    ours = {
+        c.strip()
+        for c in _run(
+            ["docker", "compose", *PROFILES, "ps", "--services", "--status", "running"],
+            cwd=REPO,
+        ).stdout.splitlines()
+    }
+    for choice in resolved:
+        already_ours = (
+            choice["service"] in ours
+            and choice["running_port"] is not None
+            and str(choice["port"]) == str(choice["running_port"])
+        )
+        if already_ours or choice["source"] == "allocated":
+            continue
+        if _bindable(choice["host"], choice["port"]):
+            continue
+        host, port, what, flag = (
+            choice["host"],
+            choice["port"],
+            choice["what"],
+            choice["flag"],
+        )
+        if choice["source"] == "flag":
+            die(
+                f"cannot bind {host}:{port} for the {what} (address already in use)",
+                f"you named that port with {flag}, so it was not reassigned",
+                f"pick another: ./orrery-up {flag} <port>   (or free that address and re-run)",
+            )
+        die(
+            f"cannot bind {host}:{port} for the {what} (address already in use)",
+            f"{choice['key']}={port} is pinned in .env from an earlier run, and the org "
+            "publishes that port inside its did:web and every endpoint",
+            "reassigning it would change the org's identity, so free that address and re-run",
+            f"to move it deliberately: ./orrery-up {flag} <port>, or edit {choice['key']} in .env"
+            + (" (PUBLIC_URL follows it)" if choice["service"] == "server" else ""),
+        )
+
+
+def port_source_label(choice: dict) -> str:
+    """How one port was decided, in the words the output uses."""
+    if choice["source"] == "pinned":
+        return f"pinned in .env as {choice['key']}"
+    if choice["source"] == "flag":
+        return f"named by {choice['flag']}"
+    if choice["port"] != choice["default"]:
+        return f"allocated; default {choice['default']} was busy"
+    return "allocated at the default"
+
+
+def ports_line(resolved: list[dict]) -> str:
+    """One line, every run, every service: the port and WHY it is that port.
+
+    The pin is the property that keeps the org's identity still across runs
+    (see resolve_ports), and it used to be invisible: the only port line was
+    printed when an allocation moved off its default, so a re-run said nothing
+    and a reader could not tell "pinned" from "re-allocated to the same
+    number". The source is now stated for each port on every run, so the
+    output itself distinguishes a first run (allocated) from every run after
+    it (pinned) and from an operator's flag (named).
+    """
+    return f"{OK} ports: " + ", ".join(
+        f"{c['what']} {c['port']} ({port_source_label(c)})" for c in resolved
+    )
+
+
+def announce_ports(resolved: list[dict]) -> None:
+    say(ports_line(resolved))
+
+
+# ── .env generation (fresh secrets, idempotent) ───────────────────────────
+
+SECRET_KEYS = {
+    "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(24),
+    # The non-superuser role the server connects as. Independent of the
+    # superuser password on purpose: the superuser initialises the database and
+    # applies migrations, and knowing one credential must not yield the other.
+    "APP_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "ORRERY_KEY_SECRET": lambda: secrets.token_hex(32),
+    "COMMUNITY_MEMBER_PASSPHRASE": lambda: secrets.token_urlsafe(32),
+}
+
+
+def render_env(args) -> str:
+    """A fresh .env — every secret newly generated for THIS install."""
+    lines = [
+        "# Generated by ./orrery-up — secrets are unique to this install.",
+        "# Safe to edit; re-running ./orrery-up keeps your values. PUBLIC_URL follows",
+        "# SERVER_PORT while it names localhost; set it to your public hostname",
+        "# (e.g. behind a proxy) and it is yours, never rewritten.",
+        f"ORG_ID={args.org_id}",
+        f"ORG_NAME={args.org_name}",
+        "ORG_DESCRIPTION=A self-hosted Orrery org of accountable agents.",
+        f"PUBLIC_URL={public_url_for(args.server_port)}",
+        f"SERVER_PORT={args.server_port}",
+        "ORRERY_PROFILE=dev",
+        "POSTGRES_DB=orrery",
+        "POSTGRES_USER=postgres",
+        f"POSTGRES_PASSWORD={SECRET_KEYS['POSTGRES_PASSWORD']()}",
+        f"APP_DB_PASSWORD={SECRET_KEYS['APP_DB_PASSWORD']()}",
+        f"ORRERY_KEY_SECRET={SECRET_KEYS['ORRERY_KEY_SECRET']()}",
+        "FEDERATION_ENFORCE_SIGNED_BROADCASTS=true",
+        "FEDERATION_REQUIRE_SIGNED_RECORDS=true",
+        "AUTO_REGISTER=false",
+        # ── Registry publication: OFF unless the operator opts in ──
+        # Written EMPTY and written EXPLICITLY. Both halves matter.
+        #
+        # docker-compose.yml reads `${REGISTRY_URL-...}`. The single dash means
+        # an EMPTY value stays empty — but an UNSET one takes the
+        # default, and this generator never wrote the key at all. So a stock
+        # `./orrery-up` install pointed at production NEST, with
+        # `AUTO_REGISTER=false` as the only thing in the way: one flag deep,
+        # not two. Phase 0 put `TEST-phase0-parity` into the live registry
+        # through exactly this door.
+        #
+        # Emitting `REGISTRY_URL=` makes the generated .env say "publish
+        # nowhere" out loud rather than leaving the answer to a shell default
+        # in another file. An operator who wants a registry sets it here, which
+        # is a deliberate act.
+        "REGISTRY_URL=",
+        "# ── local agent (the `agent` compose profile) ──",
+        f"AGENT_ID={args.agent_id}",
+        f"AGENT_NAME={args.agent_name}",
+        "AGENT_SKILLS=general",
+        f"AGENT_PORT={args.agent_port}",
+        "# ── reference renderer (the `ui` compose profile) ──",
+        f"RENDERER_PORT={args.renderer_port}",
+        f"COMMUNITY_MEMBER_PASSPHRASE={SECRET_KEYS['COMMUNITY_MEMBER_PASSPHRASE']()}",
+        "# ── OPTIONAL: bring your own LLM key (any provider; blank = keyless install) ──",
+        f"AGENT_PROVIDER={args.provider}",
+        f"AGENT_API_KEY={args.api_key}",
+        f"AGENT_MODEL={args.model}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def parse_env(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def ensure_env(args, resolved: "list[dict] | None" = None) -> None:
+    if not ENV_PATH.exists():
+        ENV_PATH.write_text(render_env(args), encoding="utf-8")
+        say(f"{OK} .env written with fresh per-install secrets")
+        return
+    # Idempotent path: keep the operator's file, but never tolerate the
+    # shipped demo password (S3) and top up any missing secret.
+    env = parse_env(ENV_PATH.read_text(encoding="utf-8"))
+    if env.get("POSTGRES_PASSWORD") == DEMO_PG_PASSWORD:
+        die(
+            ".env still carries the SHIPPED DEMO Postgres password — refusing to install with it (S3)",
+            "fresh start: `./orrery-up down --purge`, delete .env, re-run ./orrery-up",
+            "keep your data: edit POSTGRES_PASSWORD in .env to a real secret "
+            "(the db volume was initialized with the old one — see docs/INSTALL.md)",
+        )
+    added: list[str] = []
+    appended: list[str] = []
+    updates: dict[str, str] = {}
+    for key, gen in SECRET_KEYS.items():
+        if not env.get(key):
+            appended.append(f"{key}={gen()}")
+            added.append(key)
+    # Pin any port this file does not already name. An install predating a
+    # service has no key for it, so the port was resolved this run — write it
+    # down now or it is resolved again next run, and for the org that means a
+    # different did:web each time.
+    #
+    # A port the file DOES name is reused by resolution (`pinned`), so the only
+    # way the resolved port can differ from the file is a FLAG: the operator
+    # named a port, and a named port wins over `.env`. Compose reads `.env`, not
+    # this process, so the flag is honoured by rewriting the pin — leaving it
+    # would have the installer bind-check one port while Compose publishes
+    # another, which is the disagreement this function exists to prevent.
+    moved: list[dict] = []
+    for choice in resolved or []:
+        current = env.get(choice["key"])
+        if not current:
+            appended.append(f"{choice['key']}={choice['port']}")
+            added.append(choice["key"])
+        elif current != str(choice["port"]):
+            updates[choice["key"]] = str(choice["port"])
+            moved.append({**choice, "previous": current})
+    # THE COUPLING. PUBLIC_URL of the installer's own shape follows SERVER_PORT,
+    # so the port the org publishes inside its did:web is the port it listens
+    # on — whether SERVER_PORT was moved by a flag above or by hand in the file.
+    # An operator-named origin is never touched (see LOOPBACK_HOSTS).
+    server = next((c for c in resolved or [] if c["service"] == "server"), None)
+    followed: tuple[str, str] | None = None
+    if server is not None:
+        url = env.get("PUBLIC_URL")
+        if not url:
+            appended.append(f"PUBLIC_URL={public_url_for(server['port'])}")
+            added.append("PUBLIC_URL")
+        elif public_url_follows_port(url) and urlsplit(url).port != server["port"]:
+            updates["PUBLIC_URL"] = _public_url_with_port(url, server["port"])
+            followed = (url, updates["PUBLIC_URL"])
+    if updates or appended:
+        # Written once, and only when something changed: an unchanged file is
+        # not rewritten at all, so a re-run leaves it byte-identical.
+        text = rewrite_env(ENV_PATH.read_text(encoding="utf-8"), updates)
+        if appended:
+            if text and not text.endswith("\n"):
+                text += "\n"
+            text += "".join(f"{line}\n" for line in appended)
+        ENV_PATH.write_text(text, encoding="utf-8")
+    say(
+        f"{OK} .env kept (idempotent){' — generated missing value(s): ' + ', '.join(added) if added else ''}"
+    )
+    for choice in moved:
+        say(
+            f"{OK} {choice['key']} {choice['previous']} → {choice['port']} in .env "
+            f"({choice['flag']} wins over the pinned value)"
+        )
+    if followed is not None:
+        say(
+            f"{OK} PUBLIC_URL follows SERVER_PORT: {followed[0]} → {followed[1]} "
+            "(the org's did:web and every published endpoint move with it)"
+        )
+    if "APP_DB_PASSWORD" in added:
+        # The role is created by the database's first-initialisation hook. An
+        # existing db volume has already been initialised, so it has no such
+        # role and a freshly generated password matches nothing — the server
+        # would start and fail to authenticate. Say it here rather than let it
+        # be discovered from a connection error.
+        say(
+            f"{BAD} APP_DB_PASSWORD was generated for an EXISTING install. The database "
+            "was initialised before this role existed, so create it before restarting:\n"
+            '    PGOPTIONS="-c orrery.app_password=$APP_DB_PASSWORD" \\\n'
+            '      docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" '
+            "-v ON_ERROR_STOP=1 -f /opt/orrery/0006_app_role.sql\n"
+            "  Until then the server cannot connect. See infra/migrations/README.md."
+        )
+
+
+def settle_env(args, resolved: list[dict]) -> None:
+    """Refuse a port that is not ours BEFORE `.env` is touched.
+
+    `ensure_env` may now rewrite the file (a flagged port, PUBLIC_URL following
+    it), and a run that is going to refuse must not leave that footprint: an
+    `.env` rewritten to a port the installer then declined to bind would have
+    the NEXT plain run resolve that port as `pinned` and refuse it again, with
+    the operator having asked for nothing in between. So on an existing install
+    the check runs first. A first run has no `.env` yet, and Compose cannot
+    evaluate the project (`ps`, inside `check_ports`) without one, so there the
+    file is written first — nothing in it can be a rewrite.
+    """
+    if ENV_PATH.exists():
+        check_ports(resolved)
+        ensure_env(args, resolved)
+    else:
+        ensure_env(args, resolved)
+        check_ports(resolved)
+
+
+# ── stack ─────────────────────────────────────────────────────────────────
+
+
+# docker-compose.yml marks these `${VAR:?...}` — required at INTERPOLATION
+# time, so Compose refuses to evaluate the project at all without them, `down`
+# included. A teardown does not use them; it only needs the project to parse.
+COMPOSE_REQUIRED_VARS = ("POSTGRES_PASSWORD", "APP_DB_PASSWORD")
+
+
+def compose(*argv: str, check: bool = True) -> subprocess.CompletedProcess:
+    cmd = ["docker", "compose", *PROFILES, *argv]
+    env = None
+    if argv[:1] == ("down",) and not ENV_PATH.exists():
+        # The one command that must work WITHOUT `.env`: an operator whose
+        # `.env` is gone is told to `down --purge` to drop the volume that was
+        # initialised with the password it held. Placeholders satisfy the
+        # parser; nothing in a teardown reads them.
+        env = {
+            **os.environ,
+            **{k: "placeholder-for-down" for k in COMPOSE_REQUIRED_VARS},
+        }
+    proc = subprocess.run(cmd, cwd=REPO, env=env)
+    if check and proc.returncode != 0:
+        die(
+            f"`{' '.join(cmd)}` failed (exit {proc.returncode})",
+            f"diagnose: docker compose {' '.join(PROFILES)} ps",
+            "logs:     docker compose logs db-ready server agent renderer | tail -100",
+        )
+    return proc
+
+
+def compose_project_name() -> str:
+    """The name Compose gives this project, and so the prefix of its volumes.
+
+    Compose derives it from the directory basename unless COMPOSE_PROJECT_NAME
+    says otherwise, lowercased with everything outside [a-z0-9_-] dropped and
+    any leading character outside [a-z0-9] dropped. Computed here rather than
+    asked of `docker compose config`, because that evaluates the project and
+    refuses without `.env` — and the one caller needs the answer exactly when
+    `.env` is missing.
+    """
+    named = os.environ.get("COMPOSE_PROJECT_NAME", "").strip()
+    if named:
+        return named
+    name = re.sub(r"[^a-z0-9_-]", "", REPO.name.lower())
+    return re.sub(r"^[^a-z0-9]+", "", name)
+
+
+def db_volumes_of(project: str) -> list[str]:
+    """The database volume(s) Compose created for `project`, by label — the
+    name is derived, the label is what Compose itself wrote."""
+    out = _run(
+        [
+            "docker",
+            "volume",
+            "ls",
+            "-q",
+            "--filter",
+            f"label=com.docker.compose.project={project}",
+            "--filter",
+            "label=com.docker.compose.volume=db-data",
+        ]
+    ).stdout.split()
+    return sorted(out)
+
+
+def refuse_orphaned_db_volume() -> None:
+    """No `.env`, but this project's database volume exists: refuse by name.
+
+    Postgres initialises its data directory ONCE, with the POSTGRES_PASSWORD it
+    was first started with, and every later start authenticates against that
+    directory — the environment is not consulted again. A fresh `.env` carries
+    a fresh password, so the stack it starts cannot log in to the data it
+    mounts: `db-ready` waits for a schema it can never read, the server waits
+    on `db-ready`, and nothing names the cause. On top of that the fresh `.env`
+    re-allocates ports, so the org is renamed for a database it cannot reach.
+
+    That is a stated condition with two honest fixes, and this says both. Only
+    the missing-`.env` case is caught here; a present `.env` whose password
+    disagrees with the volume is caught by `db-ready` timing out and saying so.
+    """
+    if ENV_PATH.exists():
+        return
+    project = compose_project_name()
+    volumes = db_volumes_of(project)
+    if not volumes:
+        return
+    die(
+        f"no .env, but the database volume {', '.join(volumes)} from an earlier install still exists",
+        "a fresh .env would carry a new POSTGRES_PASSWORD; that volume was initialised with the "
+        "old one, so the stack would start and wait on a database it cannot log in to",
+        "keep your data: restore the .env that created it (it holds that password, the org's "
+        "pinned ports and its secrets), then re-run",
+        "start over:    ./orrery-up down --purge   (drops the volume — data loss), then re-run",
+    )
+
+
+def git_commit() -> str:
+    p = _run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO)
+    return p.stdout.strip() if p.returncode == 0 else "unknown"
+
+
+def stack_exists() -> bool:
+    """Whether Compose already holds containers for this project — the
+    difference between a first start and a reconcile, which is the
+    difference between "pulling images, be patient" being true and not."""
+    return bool(
+        _run(
+            ["docker", "compose", *PROFILES, "ps", "-a", "--services"], cwd=REPO
+        ).stdout.split()
+    )
+
+
+def up_message(existing: bool) -> str:
+    if existing:
+        return "reconciling the stack (db, server, agent, renderer) — rebuilds and restarts only what changed…"
+    return "first start: pulling images and building the stack (db, server, agent, renderer) — be patient…"
+
+
+def up() -> None:
+    say(up_message(stack_exists()))
+    os.environ.setdefault("GIT_COMMIT", git_commit())
+    if compose("up", "-d", "--build", check=False).returncode != 0:
+        # The readiness gate is the one service that FAILS `up` on purpose,
+        # and when it does its log says why (a bounded wait, then the probe's
+        # own error). Put that here, on the installer's output, rather than
+        # behind a `docker compose logs` the reader has to think to run.
+        gate = _run(
+            ["docker", "compose", *PROFILES, "logs", "--no-log-prefix", "db-ready"],
+            cwd=REPO,
+        ).stdout
+        # A restarted gate container keeps its earlier attempts' lines; only
+        # the last attempt is this run's.
+        marker = "waiting for db to finish initializing"
+        attempt = gate[gate.rfind(marker) :] if marker in gate else gate
+        if "db-ready: gave up" in attempt:
+            say(f"{BAD} the database readiness gate gave up; its log:")
+            for line in attempt.strip().splitlines():
+                say(f"    {line}")
+        die(
+            "`docker compose up` failed",
+            f"diagnose: docker compose {' '.join(PROFILES)} ps",
+            "logs:     docker compose logs db-ready server agent renderer | tail -100",
+        )
+
+
+# ── sign-of-life drill ────────────────────────────────────────────────────
+
+
+def _get(url: str, timeout: float = 5.0):
+    with _NO_PROXY_OPENER.open(url, timeout=timeout) as r:
+        return r.status, json.loads(r.read().decode())
+
+
+def _status(url: str, timeout: float = 5.0) -> "int | str":
+    """The status code an UNAUTHENTICATED caller gets — 401 and 404 included.
+
+    `_get` raises on any non-2xx, which is right for the polls but wrong here:
+    the whole question this answers is what a reader who is not signed in sees,
+    and the interesting answers are the refusals. Returns the code, or a string
+    describing a transport failure.
+    """
+    try:
+        with _NO_PROXY_OPENER.open(url, timeout=timeout) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except (urllib.error.URLError, OSError) as e:
+        return str(e)
+
+
+def _poll(desc: str, url: str, ok, budget_s: float) -> dict:
+    deadline = time.monotonic() + budget_s
+    last_err = "no attempt"
+    while time.monotonic() < deadline:
+        try:
+            status, body = _get(url)
+            if status == 200 and ok(body):
+                say(f"{OK} {desc}")
+                return body
+            last_err = f"http {status}, predicate not met"
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            last_err = str(e)
+        time.sleep(3)
+    subprocess.run(["docker", "compose", *PROFILES, "ps"], cwd=REPO)
+    subprocess.run(
+        f"docker compose {' '.join(PROFILES)} logs --tail 40 server agent renderer",
+        shell=True,
+        cwd=REPO,
+    )
+    die(
+        f"{desc} — FAILED after {budget_s:.0f}s ({last_err})",
+        f"probe it yourself: curl -s {url}",
+        f"full logs: docker compose {' '.join(PROFILES)} logs server agent renderer",
+    )
+    raise AssertionError  # unreachable
+
+
+# The renderer is a static directory with no build step, so "serve it" is one
+# command. 8600 is the port renderer/README.md and the CI portal suite already
+# use; keeping the same number means the three places agree.
+RENDERER_PORT = 8600
+
+
+def banner_urls(env: dict[str, str]) -> list[tuple[str, str]]:
+    """The URLs the ALL GREEN banner prints — and the ONLY ones it may print.
+
+    Every entry is requested by `verify_banner` before the banner is printed,
+    so a URL cannot be advertised here without an unauthenticated caller having
+    just reached it.
+
+    ⚠️ `{server}/api/members` used to be the third line, and it answers **401**
+    to exactly the reader this block is written for. The 401 is correct — the
+    bulk directory requires a signature and is deliberately not an enumeration
+    surface (server/auth_verify.py REQUIRE_AUTH_GET_PATHS) — so the defect was
+    never the route. It was that the block whose entire job is to say
+    "everything is working" pointed a brand-new user at the one thing that
+    refuses them, and stayed green because the drill POLLED four things and
+    PRINTED a fifth. Nothing compared the two lists. Now there is only one.
+
+    `/api/surfaces/dashboard` replaces it: open to an unauthenticated caller,
+    and the org's own dashboard rather than a substitute — the same A2UI
+    document the renderer paints.
+
+    The renderer is the page a first run opens, and it is in this list rather
+    than beside it: the rule is that the banner advertises nothing it has not
+    just read, and a shipped service is no more exempt from that than a route
+    is. If the `ui` profile failed to start, its line does not get printed with
+    an apology — the installer stops.
+    """
+    server = _service_origin(env, "SERVER", "7000")
+    agent = _service_origin(env, "AGENT", "8080")
+    renderer = _service_origin(env, "RENDERER", "8600")
+    return [
+        ("org", f"{server}/health"),
+        ("badge", f"{server}/.well-known/conformance.json"),
+        ("dashboard", f"{server}/api/surfaces/dashboard"),
+        ("agent", f"{agent}/.well-known/agent.json"),
+        ("renderer", f"{renderer}/"),
+    ]
+
+
+def verify_banner(entries: list[tuple[str, str]]) -> None:
+    """Request every banner URL with no credential; refuse to print a refusal.
+
+    This is the assertion, not a lint: it issues the same anonymous GET the
+    reader would, so an auth-gated or missing URL fails here rather than in
+    their browser. Reinstating an auth-gated line in `banner_urls` turns the
+    installer red on its own output.
+    """
+    bad = [(label, url, _status(url)) for label, url in entries]
+    bad = [(label, url, code) for label, url, code in bad if code != 200]
+    if bad:
+        die(
+            "the sign-of-life banner names {} URL(s) an unauthenticated caller cannot read".format(
+                len(bad)
+            ),
+            *[f"{label:<10} {url} → {code}" for label, url, code in bad],
+            "the banner may only advertise what a reader with no credential can reach:",
+            "either drop the line from banner_urls(), or point it at an open surface",
+        )
+
+
+def drill(env: dict[str, str]) -> None:
+    server = _service_origin(env, "SERVER", "7000")
+    agent = _service_origin(env, "AGENT", "8080")
+    agent_id = env.get("AGENT_ID", "demo-agent")
+
+    _poll(
+        "org /health is green",
+        f"{server}/health",
+        lambda b: b.get("status") in ("ok", "healthy") or "agent_id" in b,
+        240,
+    )
+    # Limiter buckets survive a restart only if the snapshot table is usable by
+    # the application role. On a fresh install init.sql creates it and 0006
+    # grants it, so a default install reads true — and it read FALSE on every
+    # default install for as long as the feature existed, because the boot
+    # ensure issued DDL the role is refused even for a table that exists. The
+    # drill asserts the field so that cannot regress without this line going
+    # red on the installer job.
+    _poll(
+        "rate limiter persists across restarts — /health rate_limit_persistence is true",
+        f"{server}/health",
+        lambda b: b.get("rate_limit_persistence") is True,
+        60,
+    )
+    _poll(
+        "boot conformance badge served",
+        f"{server}/.well-known/conformance.json",
+        lambda b: "payload" in b or "payload_b64" in b,
+        60,
+    )
+    # Membership probe via the org's own member COUNT on /health.
+    #
+    # This used to poll `/api/agents/{id}/profile` and treat a 200 as proof the
+    # agent had joined — which worked only because that route answered for every
+    # member whether or not they had agreed to be published. Using it as a
+    # membership probe was using a membership ORACLE: the same property that let
+    # a stranger enumerate an org by guessing ids. The route is now consent-gated
+    # and answers 404 for a member who has not opted in, which is every member by
+    # default, so this probe would wait 180s and then fail on a perfectly healthy
+    # install.
+    #
+    # /health's `members` is the honest signal: open, authoritative, and it says
+    # nothing about WHO joined — which is the distinction the gate exists to draw.
+    _poll(
+        f"agent '{agent_id}' joined — org reports a member on /health",
+        f"{server}/health",
+        lambda b: int(b.get("members") or 0) >= 1,
+        180,
+    )
+    _poll(
+        "agent serves its own card (agent.json)",
+        f"{agent}/.well-known/agent.json",
+        lambda b: bool(b.get("name") or b.get("displayName")),
+        120,
+    )
+    entries = banner_urls(env)
+    verify_banner(entries)
+    say("")
+    say("── sign of life: ALL GREEN ──────────────────────────────")
+    # Width derived from the labels, not a literal: `dashboard` is nine
+    # characters and a hardcoded 9 printed `dashboardhttp://…`.
+    width = max(len(label) for label, _ in entries) + 2
+    for label, url in entries:
+        say(f"   {label:<{width}}{url}")
+    # Something to LOOK at, and it is already running: the renderer is a compose
+    # service, so this is one URL to open rather than a command to copy. The URL
+    # is read back out of `entries` rather than rebuilt here, so the line under
+    # SEE IT cannot name an address the check above did not just read.
+    renderer_url = dict(entries).get("renderer")
+    if renderer_url:
+        say("")
+        say(f"   SEE IT — open {renderer_url}")
+        say(f'            set "Server" to {server}, pick "dashboard".')
+        say(
+            "            served by the stack; ./orrery-up down stops it with everything else."
+        )
+        say("")
+    say("   stop:    ./orrery-up down    (add --purge to drop data)")
+    if not env.get("AGENT_API_KEY"):
+        # this said "complete and working" without saying WHAT works.
+        # PR2 made the keyless path deterministic-only and corrected the CLAIMS
+        # row; this banner kept the older, broader phrasing, so the installer
+        # was the last place still implying generative behaviour without a key.
+        say("   keyless install — DETERMINISTIC ONLY. The org, agent, joining,")
+        say("   signing and governance all work; anything that needs an LLM")
+        say("   (planning, conversation, generated content) does not run.")
+        say("   To enable generative features: set AGENT_PROVIDER/AGENT_API_KEY/")
+        say("   AGENT_MODEL in .env (any provider) and `./orrery-up` again.")
+
+
+# ── selftest (no Docker) ──────────────────────────────────────────────────
+
+
+def selftest() -> None:
+    import tempfile
+
+    class A:  # minimal args stand-in
+        org_id, org_name, agent_id, agent_name = "t-org", "T Org", "t-agent", "T Agent"
+        provider = api_key = model = ""
+        server_port, agent_port, renderer_port = (
+            7000,
+            8080,
+            8600,
+        )  # as resolve_ports would set them
+
+    e1, e2 = parse_env(render_env(A)), parse_env(render_env(A))
+    for key in SECRET_KEYS:
+        assert e1[key] and e2[key] and e1[key] != e2[key], (
+            f"{key} must be unique per render"
+        )
+        assert e1[key] != DEMO_PG_PASSWORD
+    assert len(e1["POSTGRES_PASSWORD"]) >= 24 and len(e1["ORRERY_KEY_SECRET"]) == 64
+    assert len(e1["APP_DB_PASSWORD"]) >= 24
+    assert e1["APP_DB_PASSWORD"] != e1["POSTGRES_PASSWORD"], (
+        "the app role must not share the superuser password"
+    )
+    assert e1["AGENT_API_KEY"] == "", "keyless must be the default"
+    # PR4: a generated .env must say "publish nowhere" explicitly. Asserting
+    # presence AND emptiness, because omitting the key is what previously let
+    # docker-compose.yml's default point a stock install at production NEST.
+    assert "REGISTRY_URL" in e1, "render_env must write REGISTRY_URL"
+    assert e1["REGISTRY_URL"] == "", "a fresh install must publish nowhere by default"
+    assert e1["AUTO_REGISTER"] == "false", "auto-registration must stay off by default"
+
+    global ENV_PATH
+    real = ENV_PATH
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ENV_PATH = Path(td) / ".env"
+            # demo password → hard refusal
+            ENV_PATH.write_text(f"POSTGRES_PASSWORD={DEMO_PG_PASSWORD}\n")
+            try:
+                ensure_env(A)
+                raise AssertionError("demo password must be refused")
+            except SystemExit as ex:
+                assert ex.code == 1
+            # idempotent top-up: missing secrets appended, others kept
+            ENV_PATH.write_text(
+                "POSTGRES_PASSWORD=realpass123456789012345\nORG_ID=keep-me\n"
+            )
+            ensure_env(A)
+            env = parse_env(ENV_PATH.read_text())
+            assert (
+                env["ORG_ID"] == "keep-me"
+                and env["POSTGRES_PASSWORD"] == "realpass123456789012345"
+            )
+            assert env["ORRERY_KEY_SECRET"] and env["COMMUNITY_MEMBER_PASSPHRASE"]
+            before = ENV_PATH.read_text()
+            ensure_env(A)
+            assert ENV_PATH.read_text() == before, "second run must be a no-op"
+
+            # ── PUBLIC_URL follows SERVER_PORT; an operator's origin does not ──
+            class U:  # nothing named on the command line
+                server_port = agent_port = renderer_port = None
+
+            def rerun(args=U) -> dict[str, str]:
+                env = parse_env(ENV_PATH.read_text())
+                ensure_env(args, resolve_ports(args, env))
+                return parse_env(ENV_PATH.read_text())
+
+            base = (
+                "POSTGRES_PASSWORD=realpass123456789012345\n"
+                "APP_DB_PASSWORD=fixture-app-role-password\n"
+                f"ORRERY_KEY_SECRET={'a' * 64}\n"
+                "COMMUNITY_MEMBER_PASSPHRASE=passphrase-passphrase-passphrase\n"
+                "PUBLIC_URL={url}\nSERVER_PORT={port}\nAGENT_PORT=8080\nRENDERER_PORT=8600\n"
+            )
+            # SERVER_PORT hand-edited to 7100, PUBLIC_URL left at 7000: the org
+            # must not publish a port it is not listening on.
+            ENV_PATH.write_text(base.format(url="http://localhost:7000", port=7100))
+            assert rerun()["PUBLIC_URL"] == "http://localhost:7100", (
+                "PUBLIC_URL must follow a hand-edited SERVER_PORT"
+            )
+
+            # A named port rewrites the pin (Compose reads .env, not this
+            # process) and the URL follows the rewritten pin.
+            class F:
+                server_port, agent_port, renderer_port = 7999, None, None
+
+            env = rerun(F)
+            assert env["SERVER_PORT"] == "7999" and env["PUBLIC_URL"].endswith(
+                ":7999"
+            ), "a flagged port must be pinned and PUBLIC_URL must follow it"
+            # An origin the operator named — no port, real host — is theirs.
+            proxied = base.format(url="https://org.example", port=7100)
+            ENV_PATH.write_text(proxied)
+            rerun()
+            assert ENV_PATH.read_text() == proxied, (
+                "an external PUBLIC_URL must be left exactly as written"
+            )
+            # And an agreeing file is not rewritten at all.
+            agreed = base.format(url="http://localhost:7100", port=7100)
+            ENV_PATH.write_text(agreed)
+            stamp = 1_000_000_000_000_000_000  # a fixed instant, not the clock
+            os.utime(ENV_PATH, ns=(stamp, stamp))
+            rerun()
+            assert ENV_PATH.read_text() == agreed and (
+                ENV_PATH.stat().st_mtime_ns == stamp
+            ), "an unchanged .env must not be written"
+    finally:
+        ENV_PATH = real
+
+    # ── port resolution: precedence, and the pin that keeps identity still ──
+    class P:  # args with nothing named
+        server_port = agent_port = renderer_port = None
+
+    pinned_env = {"SERVER_PORT": "7123", "AGENT_PORT": "8123", "RENDERER_PORT": "8623"}
+    by_service = {c["service"]: c for c in resolve_ports(P, pinned_env)}
+    assert [c["port"] for c in by_service.values()] == [7123, 8123, 8623], (
+        "a pinned .env port must be reused"
+    )
+    assert {c["source"] for c in by_service.values()} == {"pinned"}
+    # The pin is honoured even while that port is BUSY: re-allocating would move
+    # the org's did:web, which renames the org rather than relocating it.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as busy:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen(1)
+        taken = busy.getsockname()[1]
+        still = {
+            c["service"]: c
+            for c in resolve_ports(P, {**pinned_env, "SERVER_PORT": str(taken)})
+        }
+        assert (
+            still["server"]["port"] == taken and still["server"]["source"] == "pinned"
+        ), (
+            "a busy pinned port must stay pinned — check_ports refuses it, resolution never moves it"
+        )
+        # ...and allocation walks past a port that is actually in use.
+        assert _allocate("127.0.0.1", taken, set(), "probe", "--probe-port") > taken
+
+    class Q:  # an operator names one
+        server_port, agent_port, renderer_port = 7999, None, None
+
+    named = {c["service"]: c for c in resolve_ports(Q, pinned_env)}
+    assert named["server"]["port"] == 7999 and named["server"]["source"] == "flag", (
+        "a named port must win"
+    )
+    assert named["agent"]["source"] == "pinned", (
+        "naming one port must not disturb the others"
+    )
+
+    # Two services must never be handed the same address in one resolution.
+    fresh = resolve_ports(P, {})
+    assert len({c["port"] for c in fresh}) == 3
+
+    say(
+        f"{OK} selftest passed (secret uniqueness, demo-password refusal, idempotency, "
+        "port precedence flag > pinned > allocated, PUBLIC_URL follows SERVER_PORT)"
+    )
+
+
+def down_messages(purge: bool, env_kept: bool) -> list[str]:
+    """What `down` did, and what it deliberately did not touch.
+
+    `--purge` drops the volumes and nothing else; `.env` — every generated
+    secret and the org's pinned ports — stays, and a reader who has just asked
+    for a purge should hear that rather than find it on the next run.
+    """
+    if not purge:
+        return [f"{OK} stack stopped (data kept — --purge to drop)"]
+    lines = [f"{OK} stack stopped and volumes purged (the database is gone)"]
+    if env_kept:
+        lines.append(
+            "   .env kept: its secrets and the org's pinned ports survive, so the next run "
+            "is the same org on an empty database. Delete .env too for a new org."
+        )
+    else:
+        lines.append("   no .env to keep; the next run is a fresh install.")
+    return lines
+
+
+INTERRUPTED = 130  # the conventional exit status for SIGINT
+
+
+def interrupted() -> int:
+    """A Ctrl-C mid-run used to print nothing, leaving a reader with a
+    half-started stack and no word on whether it is safe to run again. It is:
+    `.env` is kept and Compose reconciles whatever is running."""
+    print(file=sys.stderr)
+    print(f"[orrery-up] {BAD} interrupted", file=sys.stderr)
+    print(
+        "            → the stack may be partly started; ./orrery-up again resumes it "
+        "(.env is kept, running services are reconciled), ./orrery-up down stops it",
+        file=sys.stderr,
+    )
+    return INTERRUPTED
+
+
+# ── main ──────────────────────────────────────────────────────────────────
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="orrery-up",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "command", nargs="?", default="up", choices=["up", "down", "status", "e2e"]
+    )
+    ap.add_argument(
+        "-y", "--yes", action="store_true", help="non-interactive: accept all defaults"
+    )
+    ap.add_argument("--org-id", default="demo-org")
+    ap.add_argument("--org-name", default="Demo Org")
+    ap.add_argument("--agent-id", default="demo-agent")
+    ap.add_argument("--agent-name", default="Demo Agent")
+    # No argparse defaults: the installer ALLOCATES a free port when nobody has
+    # named one, and `default=7000` would make "the operator asked for 7000"
+    # indistinguishable from "nobody asked", turning every install into a
+    # refusal on a busy machine — the behaviour this replaces. None means
+    # unnamed; resolve_ports() decides.
+    ap.add_argument(
+        "--server-port",
+        type=int,
+        default=None,
+        help="pin the org server to this host port (default: first free from 7000)",
+    )
+    ap.add_argument(
+        "--agent-port",
+        type=int,
+        default=None,
+        help="pin the local agent to this host port (default: first free from 8080)",
+    )
+    ap.add_argument(
+        "--renderer-port",
+        type=int,
+        default=None,
+        help="pin the reference renderer to this host port (default: first free from 8600)",
+    )
+    ap.add_argument(
+        "--provider",
+        default="",
+        help="OPTIONAL LLM provider (any: anthropic/openai/xai/groq/local)",
+    )
+    ap.add_argument(
+        "--api-key",
+        default="",
+        help="OPTIONAL LLM key — omit for a complete keyless install",
+    )
+    ap.add_argument("--model", default="", help="OPTIONAL model name for your provider")
+    ap.add_argument(
+        "--purge",
+        action="store_true",
+        help="with `down`: also remove volumes (data loss!)",
+    )
+    ap.add_argument(
+        "--skip-drill",
+        action="store_true",
+        help="start the stack but skip sign-of-life probes",
+    )
+    ap.add_argument(
+        "--selftest",
+        action="store_true",
+        help="run internal unit checks and exit (no Docker)",
+    )
+    args = ap.parse_args()
+
+    if args.selftest:
+        selftest()
+        return 0
+    if args.command == "down":
+        preflight()
+        compose("down", *(["-v"] if args.purge else []))
+        for line in down_messages(args.purge, ENV_PATH.exists()):
+            say(line)
+        return 0
+    if args.command == "e2e":
+        # One-command local run of the full e2e/functional suite: boots
+        # the stack (org + agent + second org for the federation/quilt legs),
+        # prepares a private venv with the probe deps + the agent SDK, and
+        # runs scripts/e2e_probes.py. Exit code = the suite's verdict.
+        preflight()
+        refuse_orphaned_db_volume()
+        resolved = resolve_ports(
+            args,
+            parse_env(ENV_PATH.read_text(encoding="utf-8"))
+            if ENV_PATH.exists()
+            else {},
+        )
+        for choice in resolved:
+            setattr(args, choice["flag"].lstrip("-").replace("-", "_"), choice["port"])
+        settle_env(args, resolved)
+        env = parse_env(ENV_PATH.read_text(encoding="utf-8"))
+        os.environ.setdefault("GIT_COMMIT", git_commit())
+        fed_overlay = str(REPO / "infra" / "compose.e2e-federation.yml")
+        # `agent` ONLY, deliberately — not PROFILES. The portal-UI leg of this
+        # suite serves the renderer itself on the same port to drive it from a
+        # separate origin, so starting the `ui` service here would put two
+        # listeners on one address and fail the boot rather than the test.
+        cmd = [
+            "docker",
+            "compose",
+            "-f",
+            str(REPO / "docker-compose.yml"),
+            "-f",
+            fed_overlay,
+            "--profile",
+            "agent",
+            "up",
+            "-d",
+            "--build",
+        ]
+        if subprocess.run(cmd, cwd=REPO).returncode != 0:
+            die(
+                "stack boot for e2e failed",
+                "logs: docker compose --profile agent logs | tail -100",
+            )
+        venv = REPO / ".orrery-e2e-venv"
+        py = venv / "bin" / "python"
+        if not py.exists():
+            say("creating e2e venv (+ agent SDK) — first run only…")
+            subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
+            if (
+                subprocess.run(
+                    [
+                        str(venv / "bin" / "pip"),
+                        "install",
+                        "-q",
+                        "-e",
+                        str(REPO / "agent"),
+                        "-c",
+                        str(REPO / "agent" / "constraints.txt"),
+                        "httpx",
+                    ],
+                    cwd=REPO,
+                ).returncode
+                != 0
+            ):
+                die("e2e venv setup failed")
+        server = _service_origin(env, "SERVER", "7000")
+        agent_url = _service_origin(env, "AGENT", "8080")
+        rc = subprocess.run(
+            [
+                str(py),
+                str(REPO / "scripts" / "e2e_probes.py"),
+                "--server",
+                server,
+                "--agent",
+                agent_url,
+                "--server2",
+                "http://localhost:7001",
+            ],
+            cwd=REPO,
+            env=_local_probe_env(env),
+        ).returncode
+        say(
+            f"{OK} e2e suite PASSED"
+            if rc == 0
+            else f"{BAD} e2e suite FAILED (exit {rc})"
+        )
+        return rc
+
+    if args.command == "status":
+        drill(
+            parse_env(ENV_PATH.read_text(encoding="utf-8")) if ENV_PATH.exists() else {}
+        )
+        return 0
+
+    # up
+    preflight()
+    refuse_orphaned_db_volume()
+    if not args.yes and sys.stdin.isatty() and not ENV_PATH.exists():
+        # The only choices a human meaningfully makes at install time. Enter
+        # accepts the default; everything else is editable in .env afterwards.
+        args.org_id = input(f"org id [{args.org_id}]: ").strip() or args.org_id
+        args.org_name = (
+            input(f"org display name [{args.org_name}]: ").strip() or args.org_name
+        )
+        args.agent_id = (
+            input(f"first agent id [{args.agent_id}]: ").strip() or args.agent_id
+        )
+        key = input("LLM API key (OPTIONAL — Enter for a keyless install): ").strip()
+        if key:
+            args.api_key = key
+            args.provider = input("provider (anthropic/openai/xai/groq/…): ").strip()
+            args.model = input("model (blank = provider default): ").strip()
+    # Ports are resolved BEFORE `.env` is written, because `.env` is where the
+    # choice is pinned: PUBLIC_URL is built from the server port and the org's
+    # did:web is built from PUBLIC_URL, so the value written here is the one the
+    # org publishes for the life of the install.
+    resolved = resolve_ports(
+        args,
+        parse_env(ENV_PATH.read_text(encoding="utf-8")) if ENV_PATH.exists() else {},
+    )
+    for choice in resolved:
+        setattr(args, choice["flag"].lstrip("-").replace("-", "_"), choice["port"])
+    settle_env(args, resolved)
+    announce_ports(resolved)
+    up()
+    if not args.skip_drill:
+        drill(parse_env(ENV_PATH.read_text(encoding="utf-8")))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(interrupted())

@@ -1,0 +1,141 @@
+[project]
+name = "orrery-agent"
+version = "0.2.0"
+description = "The sovereign agent runtime an individual owns and points at an org."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sharath Chandra", email = "sharath@komputix.com" }]
+keywords = ["agents", "org", "a2a", "ag-ui", "arp", "accountability"]
+# The import package stays `community_member` (renaming 164 internal imports is the
+# kind of breaking change the "keep the wire" decision avoids); the distribution is
+# `orrery-agent`.
+dependencies = [
+    "httpx>=0.24.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+    "uvicorn>=0.20.0",
+    "fastapi>=0.100.0",
+    "jcs>=0.2.0",
+    "cryptography>=41.0.0",
+    # Consent-gate authorization envelopes (consent/aae_emit.py); the exact
+    # pin (==0.1.0) lives in constraints.txt per R3.
+    "sm-aae>=0.1.0",
+    "sm-arp>=0.3.0",
+    "sm-bridge>=0.4.1",
+    "sm-conformance>=0.3.1",
+    # Floor at 0.2.3: the first release whose sm-arp cap admits 0.3.0 (and with
+    # the selective-disclosure surface); the exact pin lives in constraints.txt
+    # per R3 — see docs/integrations/STELLARMINDS.md.
+    "sm-parc>=0.2.3",
+    # Ed25519 sovereign identity + BIP39 recovery are core, not optional: the
+    # wire scheme is Ed25519 (auth.sign_request_body) and signup derives the
+    # identity from a recovery phrase (wizard._generate_identity_with_recovery),
+    # advertised as "the only way to restore this identity".
+    "pynacl>=1.5.0",
+    "base58>=2.1.1",
+    "mnemonic>=0.20",
+    "jsonschema>=4.18.0",
+    "referencing>=0.30.0",
+]
+
+[project.optional-dependencies]
+ed25519 = ["pynacl>=1.5.0", "base58>=2.1.1"]
+# Owner-principal establishment (community_member/owner.py): the Authority
+# Evidence envelope the OIDC consent flow produces. Deliberately an EXTRA rather
+# than a core dependency: sm-authority requires Python >=3.11 and this
+# distribution supports >=3.10, so making it core would break 3.10 installs.
+# Absent, the OIDC owner path raises and REFUSES — it never degrades to listing
+# without an owner. It is in requirements.lock, so CI exercises it for real.
+owner = ["sm-authority>=0.2.0"]
+# DNS-01 domain-control challenges need a resolver. HTTP-01 does not (it uses
+# httpx, already core), so this is an extra rather than a dependency: a
+# domain-owning business that can host a file never needs it, and absent it the
+# DNS-01 path raises and names the alternative instead of silently reporting an
+# unprovable challenge as a failed one.
+domain = ["dnspython>=2.0"]
+dev = [
+    "pynacl>=1.5.0",
+    "base58>=2.1.1",
+    "mnemonic>=0.20",
+    "keyring>=24.0",
+    "sm-authority>=0.2.0",
+    "dnspython>=2.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.15",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+community-member = "community_member.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Sharathvc23/orrery"
+
+# Quality gate — mirrors the sm-* family contract (ruff + mypy), with
+# line-length 120 to match this app's existing style (the sm-* libs use 100).
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+# Vendored, byte-for-byte mirror of the canonical sm-arp verifier — a lockstep
+# test asserts it matches upstream exactly, so ruff must never touch it.
+extend-exclude = ["community_member/_arp_verify"]
+
+[tool.ruff.lint]
+# Correctness-focused gate: E/F pycodestyle+pyflakes, I import-sort, UP pyupgrade.
+# (The opinionated refactor families B/SIM/RUF are a follow-up tightening; the
+# new projectnanda modules below already pass them.)
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Deferred imports after module-level setup are intentional in a few spots
+# (avoid import cycles / keep optional deps lazy).
+"community_member/channel_receiver.py" = ["E402"]
+
+# mypy: scoped to the projectnanda surface modules added in the sm-* integration
+# (these are written to type-check); the rest of the app is a follow-up sweep.
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# Scope checking to the target files; imported modules supply types but their
+# own (pre-existing, untyped) errors aren't reported. The whole-app type sweep
+# is a separate follow-up.
+follow_imports = "silent"
+# The pydantic plugin teaches mypy that optional model fields (sm-bridge's
+# SmAgentFacts/SmSkill/etc.) have defaults and need not be passed.
+plugins = ["pydantic.mypy"]
+files = [
+    "community_member/host39.py",
+    "community_member/sm_bridge_adapter.py",
+    "community_member/conformance_badge.py",
+    "community_member/reputation_credential.py",
+    "community_member/receipt_disclosure.py",
+    "community_member/aae_audit.py",
+    "community_member/decision_feed.py",
+    # The owner-principal / listing-consent gate. Type-checked because a
+    # wrong-shaped verdict here is the difference between refusing a listing
+    # and publishing an unauthorised one.
+    "community_member/owner.py",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["community_member"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "e2e: live-process end-to-end drives (real org server + serve.py members); enabled only when ORRERY_E2E=1",
+]
+
+# Coverage (R1): tests are excluded by --cov=community_member; the
+# vendored byte-mirror _arp_verify is drift-guarded, not unit-tested here.
+# Floors enforced in CI: --cov-fail-under (global) + scripts/coverage_gate.py.
+[tool.coverage.run]
+omit = ["community_member/_arp_verify/*"]

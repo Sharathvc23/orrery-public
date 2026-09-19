@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Orrery A2UI reference renderer — a static page, no build step.
+      Serve this directory with any static file server (see README.md):
+        python3 -m http.server 8600
+      then open http://localhost:8600 and point it at an org or agent
+      /api/surfaces/* endpoint. It has no server-side coupling beyond the
+      published surfaces API.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self' http: https:; form-action 'none'; base-uri 'none'"
+    />
+    <title>Orrery · A2UI surface renderer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="chrome">
+      <h1>A2UI surface renderer</h1>
+      <p class="chrome-sub">
+        Reference client for Orrery generative surfaces — AG-UI SSE snapshot + deltas, rendered as untrusted declarative data.
+      </p>
+      <div class="controls">
+        <label>
+          <span>Server</span>
+          <input id="base-url" type="url" placeholder="http://localhost:7000" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          <span>Page</span>
+          <input id="page-id" type="text" value="dashboard" list="known-pages" autocomplete="off" spellcheck="false" />
+          <datalist id="known-pages">
+            <option value="dashboard"></option>
+            <option value="digest"></option>
+            <option value="members"></option>
+            <option value="events"></option>
+            <option value="activity"></option>
+            <option value="intents"></option>
+            <option value="skills"></option>
+            <option value="audit"></option>
+            <option value="trust"></option>
+            <option value="docs"></option>
+          </datalist>
+        </label>
+        <button id="connect" type="button">Connect (live)</button>
+        <button id="fetch-once" type="button">Fetch once</button>
+        <button id="disconnect" type="button" hidden>Disconnect</button>
+      </div>
+      <div id="status" class="status" role="status">idle</div>
+    </header>
+    <main>
+      <div id="surface-root" class="surface-root" aria-live="polite"></div>
+    </main>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

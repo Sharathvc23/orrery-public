@@ -1,0 +1,55 @@
+# Live-catalog canary.
+#
+# Walks each DEPLOYED org's /.well-known/ai-catalog.json and resolves every entry
+# it advertises. Fails if any entry 404s.
+#
+# WHY THIS EXISTS SEPARATELY FROM ci.yml: `probe_registry_integrity` runs against
+# the hermetic compose stack, where the same run creates and checks every entry.
+# Residue cannot exist there, so it always passes — a FALSE GREEN rather than a
+# flake, because the check cannot observe the condition that breaks the claim.
+# On 2026-08-02 the astrocity org advertised 24 entries of which 6 resolved, with
+# the hermetic gate green throughout. A failure that only exists in the DEPLOYED
+# state needs a check that runs against the deployed state.
+#
+# Scheduled, not a PR gate: it asserts a property of production, so a red run
+# means "production drifted", not "this PR is wrong". Blocking merges on it would
+# make an unrelated PR author responsible for an operational problem.
+name: catalog canary
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours, matching the umbrella's gate-canary cadence
+  workflow_dispatch:
+    inputs:
+      orgs:
+        description: "Space-separated base URLs to check (blank: use the CANARY_ORGS variable)"
+        required: false
+        default: ""
+
+# `issues: write` was granted when this file was created (7afbe7a) but no step ever
+# used it — the job runs scripts/catalog_canary.py, which files no issue and is
+# passed no token. Dropped rather than left as a standing unused write grant.
+permissions:
+  contents: read
+
+jobs:
+  resolve-catalog-entries:
+    name: every advertised entry resolves
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx
+      # The hostnames are CONFIGURATION, not a literal in a public tree. The
+      # `CANARY_ORGS` repository variable holds them, so this repo keeps its
+      # canary while a fork — which has no such variable — skips cleanly instead
+      # of probing infrastructure its owner does not operate. A variable rather
+      # than a secret: these are public URLs, and a secret would only mask them
+      # in the log while still aiming the requests.
+      - name: Walk each org's catalog and resolve every entry
+        env:
+          ORGS: ${{ github.event.inputs.orgs || vars.CANARY_ORGS }}
+        run: python scripts/catalog_canary.py

@@ -1,0 +1,43 @@
+# Two-org federation handshake drill.
+#
+#   docker compose -f docker-compose.yml -f infra/compose.e2e-federation.yml \
+#     [--profile agent] up -d --build
+#
+# Adds a SECOND org (`server2`, db-less — the degraded mode the server
+# explicitly supports) and cross-wires the two through the operator anchor
+# (KNOWN_CHAPTER_ENDPOINTS) with autodiscovery ON — a drill-only posture:
+# nothing here changes the shipped defaults (autodiscovery stays default-OFF
+# in the base compose / installer). Low think-cycle interval so the handshake
+# converges within a CI budget. Signed-federation enforcement stays ON for
+# both sides — the handshake must succeed UNDER the production trust posture.
+services:
+  server:
+    environment:
+      KNOWN_CHAPTER_ENDPOINTS: http://server2:7000
+      FEDERATION_AUTODISCOVER: "true"
+      THINK_CYCLE_INTERVAL: "15"
+
+  server2:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.server
+    environment:
+      AGENT_ID: e2e-org-two
+      AGENT_NAME: E2E Org Two
+      AGENT_DESCRIPTION: The second org of the federation handshake drill.
+      PORT: "7000"
+      PUBLIC_URL: http://server2:7000
+      KNOWN_CHAPTER_ENDPOINTS: http://server:7000
+      FEDERATION_AUTODISCOVER: "true"
+      THINK_CYCLE_INTERVAL: "15"
+      FEDERATION_ENFORCE_SIGNED_BROADCASTS: "true"
+      FEDERATION_REQUIRE_SIGNED_RECORDS: "true"
+      AUTO_REGISTER: "false"
+      # server2 is defined from scratch, so it does not inherit the base
+      # service's environment. Sealing is required, so without this it refuses
+      # to start and the drill fails at boot rather than at the handshake.
+      ORRERY_KEY_SECRET: ${ORRERY_KEY_SECRET:-}
+      ORRERY_REQUIRE_SEALED_SECRETS: ${ORRERY_REQUIRE_SEALED_SECRETS:-true}
+    ports:
+      - "127.0.0.1:7001:7000"
+    restart: unless-stopped

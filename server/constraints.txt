@@ -1,0 +1,55 @@
+# Supply-chain constraints for the server install (R3).
+# Applied via `pip install -c constraints.txt` in CI and infra/Dockerfile.server
+# so a transitive dependency can never float an sm-* package off its pin.
+#
+# NOTE: server and agent are unified on sm-arp==0.3.2 (sm-parc 0.2.3 lifted
+# its <0.3 cap). Bump procedure: docs/integrations/STELLARMINDS.md.
+sm-aae==0.1.0
+sm-arp==0.3.2
+#
+# sm-bridge 0.6.0 (from 0.4.1): maintenance, no security driver. 0.5.0's
+# delegated binding-write surface is consumed by nanda-connect, which Orrery does
+# not use; 0.6.0 adds an opt-in [feed] extra we deliberately do NOT take (see
+# below) and fixes sm_bridge.__version__, which was a hardcoded literal — a 0.5.0
+# install reports '0.4.1' (measured). Orrery never reads that attribute, so the
+# drift is upstream hygiene, not a correctness issue here.
+# The >=0.4.1 FLOOR in pyproject.toml is deliberately NOT raised: every symbol
+# Orrery imports exists in 0.4.1 with an identical shape (verified by
+# introspection across both wheels), so 0.4.1 remains the honest minimum API.
+# The lockfiles are what CI and the image install; the floor states a requirement.
+# NOT taking [feed]: it hash-chains the delta log for COMPLETENESS, but Orrery's
+# DeltaStore is in-memory and reseeds from a wall-clock base_seq on every restart
+# (_monotonic_base_seq) — deliberately gapped. A completeness-verifiable
+# feed over an intentionally gapped log would either false-alarm every restart or
+# claim a guarantee the store cannot honour.
+#
+# ⚠️ THIS REFUSAL STILL STANDS, AND IT IS NOT ABOUT THE FEDERATION FEED. Since
+# the intelligence-feed work this org runs TWO logs, and the next reader will otherwise conclude
+# the refusal was reversed:
+#
+#   * sm-bridge's MEMBER-DELTA store — this one. In-memory, reseeded from a wall
+#     clock on every restart, DELIBERATELY GAPPED. Its contract is a monotonic
+#     sequence, not a gapless one, so gaps between bases are correct there. It
+#     must NOT be hash-chained, and [feed] is still refused.
+#   * the sm-federation §4 INTELLIGENCE feed — a different payload (aggregate
+#     intelligence envelopes, not member deltas), a different store
+#     (public.federation_feed_entries, durable and append-only) and a different
+#     contract (gapless, chained, and a restart that reseeded it would be
+#     detectable as head_rewind rather than silent). server/federation_feed.py.
+#
+# The distinction matters because the reasoning here was overgeneralised once
+# already: that change's report and conformance/federation/claims.json both cited
+# THIS note as evidence that Orrery could not have a completeness-verifiable feed
+# AT ALL. It never said that. It said this store cannot back one.
+sm-bridge==0.6.0
+sm-conformance==0.3.2
+sm-divergence==0.8.0
+# sm-federation + its sm-feed transport dependency. sm-feed is pinned here
+# explicitly even though sm-federation pulls it — same rule as sm-resolver under
+# sm-divergence: a transitively-reached sm-* package is still an sm-* package and
+# must not float.
+sm-federation==0.6.0
+sm-feed==0.2.0
+sm-listing==0.3.0
+sm-locp==0.2.1
+sm-resolver==0.2.0

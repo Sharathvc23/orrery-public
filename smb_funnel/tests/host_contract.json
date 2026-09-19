@@ -1,0 +1,221 @@
+{
+  "_about": [
+    "THE REFUSAL CONTRACT, MEASURED FROM THE REAL HOST, ASSERTED FROM BOTH SIDES.",
+    "smb_funnel/README.md claims the funnel 'speaks the real host contract either way'.",
+    "It did not: smb_host is FastAPI and answers {detail: ...}, while src/mock_core.js",
+    "answered {error: ...} with different statuses — and the mock PROVISIONED two",
+    "inputs the host refuses outright (a punctuation-only name, a non-string name),",
+    "so the demo backend showed a success path the product does not have.",
+    "",
+    "This file is the single statement of what a refusal looks like. Two suites read",
+    "it and neither can drift without the other going red:",
+    "  smb_host/test_main.py            drives the REAL host against it",
+    "  smb_funnel/tests/contract-parity.test.mjs  drives the MOCK against it",
+    "If the host changes, its test reddens; updating this file then reddens the",
+    "mock's until the mock follows. A one-sided pin is what let them diverge.",
+    "",
+    "detail is 'string' (an exact message both must produce) or 'array' (FastAPI's",
+    "validation list, where loc and type are pinned and msg wording is the",
+    "framework's to change).",
+    "",
+    "Editing this file must wake BOTH suites. The CI 'changes' filter names it",
+    "explicitly for the smb_host job, which no Python path would otherwise match —",
+    "a filter that wakes only one side is a one-sided pin with extra steps."
+  ],
+  "_measured_at": "origin/main c920702, SMB_HOST_POOL_SIZE=0, no SMB_HOST_PROVISION_TOKEN",
+  "provision": [
+    {
+      "case": "no business_name field",
+      "body": {},
+      "status": 422,
+      "detail": "array",
+      "loc": [
+        "body",
+        "business_name"
+      ],
+      "type": "missing"
+    },
+    {
+      "case": "empty business_name",
+      "body": {
+        "business_name": "",
+        "contact": "https://bookings.example/hook"
+      },
+      "status": 422,
+      "detail": "array",
+      "loc": [
+        "body",
+        "business_name"
+      ],
+      "type": "string_too_short"
+    },
+    {
+      "case": "business_name is not a string",
+      "body": {
+        "business_name": 5,
+        "contact": "https://bookings.example/hook"
+      },
+      "status": 422,
+      "detail": "array",
+      "loc": [
+        "body",
+        "business_name"
+      ],
+      "type": "string_type"
+    },
+    {
+      "case": "punctuation only — cannot slug to an id",
+      "body": {
+        "business_name": "!!!",
+        "contact": "https://bookings.example/hook"
+      },
+      "status": 400,
+      "detail": "string",
+      "message": "business_name must contain at least one alphanumeric character"
+    },
+    {
+      "case": "whitespace only",
+      "body": {
+        "business_name": "   ",
+        "contact": "https://bookings.example/hook"
+      },
+      "status": 400,
+      "detail": "string",
+      "message": "business_name must contain at least one alphanumeric character"
+    },
+    {
+      "case": "duplicate name",
+      "body": {
+        "business_name": "Fadeaway Barbershop",
+        "contact": "https://bookings.example/hook"
+      },
+      "provision_first": true,
+      "status": 409,
+      "detail": "string",
+      "message": "a business is already provisioned under the name 'Fadeaway Barbershop'"
+    },
+    {
+      "case": "no contact field",
+      "body": {
+        "business_name": "Unreachable Co"
+      },
+      "status": 422,
+      "detail": "array",
+      "loc": [
+        "body",
+        "contact"
+      ],
+      "type": "missing"
+    },
+    {
+      "case": "empty contact",
+      "body": {
+        "business_name": "Unreachable Co",
+        "contact": ""
+      },
+      "status": 422,
+      "detail": "array",
+      "loc": [
+        "body",
+        "contact"
+      ],
+      "type": "string_too_short"
+    },
+    {
+      "case": "contact names no channel a booking can be delivered on",
+      "body": {
+        "business_name": "Unreachable Co",
+        "contact": "call me maybe"
+      },
+      "status": 400,
+      "detail": "string",
+      "message": "'call me maybe' is neither an https webhook URL nor an email address, so it names no channel a booking can be delivered on"
+    },
+    {
+      "case": "plain http webhook",
+      "body": {
+        "business_name": "Unreachable Co",
+        "contact": "http://insecure.example/hook"
+      },
+      "status": 400,
+      "detail": "string",
+      "message": "a plain http webhook is refused: a booking carries a customer's name and time, so the delivery URL must be https"
+    }
+  ],
+  "card": [
+    {
+      "case": "unknown tenant",
+      "tenant_id": "no-such-tenant",
+      "status": 404,
+      "detail": "string",
+      "message": "no tenant 'no-such-tenant'"
+    }
+  ],
+  "book": [
+    {
+      "case": "unknown tenant",
+      "tenant_id": "no-such-tenant",
+      "body": {
+        "service": "Haircut",
+        "provider": "Someone",
+        "datetime": "2026-08-20T10:00:00Z"
+      },
+      "status": 404,
+      "detail": "string",
+      "message": "no tenant 'no-such-tenant'"
+    },
+    {
+      "case": "missing provider and datetime",
+      "body": {
+        "service": "Haircut"
+      },
+      "status": 400,
+      "detail": "string",
+      "message": "missing required field(s): provider, datetime"
+    },
+    {
+      "case": "empty body",
+      "body": {},
+      "status": 400,
+      "detail": "string",
+      "message": "missing required field(s): service, provider, datetime"
+    }
+  ],
+  "unknown_route": {
+    "case": "a path neither side serves",
+    "path": "/nope",
+    "status": 404,
+    "detail": "string",
+    "message": "Not Found"
+  },
+  "book_success": {
+    "_about": [
+      "THE SUCCESS PATH, NOT ONLY THE REFUSALS.",
+      "",
+      "Everything above states what a REFUSAL looks like. This states the one",
+      "value on the success path that both sides must agree on, and it is here",
+      "for the same reason: `booking.status` is asserted by smb_host's suite and",
+      "constructed by smb_funnel's mock, and until now each side held its own",
+      "copy of the literal. Two copies of a wire value with no shared statement",
+      "is how the mock became more permissive than the host on the refusal",
+      "path — the divergence this file was created to end.",
+      "",
+      "THE VALUE IS `recorded`, NOT `confirmed`, AND THE WORD IS THE POINT.",
+      "The host writes a booking row and checks the slot was free. There is no",
+      "acceptance step anywhere in the path: nobody at the business agrees to",
+      "anything, and `status` is set before delivery is even consulted, so it",
+      "ships alongside `delivered: false` in the same response. `confirmed`",
+      "told a reader the business had agreed. `recorded` says what happened.",
+      "",
+      "⚠️ THIS IS THE BOOKING'S STATUS, NOT AN HTTP STATUS. The `status` key",
+      "inside the refusal entries above is the HTTP code; this one is a field",
+      "of the response body. They are named apart on purpose.",
+      "",
+      "⚠️ AND IT IS NOT THE BADGE VOCABULARY. `Signature valid - issuer not",
+      "confirmed` is the receipt-verification badge and has nothing to do with",
+      "a booking's status. A rename that swept the word `confirmed` across the",
+      "funnel would eat a load-bearing, separately-pinned label."
+    ],
+    "booking_status": "recorded"
+  }
+}

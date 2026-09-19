@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarminds.ai/schemas/sm-arp/0.1/evidence.schema.json",
+  "title": "ARP Evidence",
+  "description": "Optional structured pointers substantiating the action. See spec.md §5.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "screenshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["hash", "mime"],
+        "additionalProperties": false,
+        "properties": {
+          "hash": { "$ref": "common.schema.json#/$defs/sha256Hash" },
+          "mime": { "$ref": "common.schema.json#/$defs/ianaMediaType" },
+          "ref":  {
+            "type": "string",
+            "minLength": 1,
+            "description": "URL or content-addressable identifier from which the screenshot can be retrieved. Verifiers do not dereference."
+          }
+        }
+      }
+    },
+    "external_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "URL, transaction ID, confirmation number, or other third-party reference."
+      }
+    },
+    "prompt_lineage_hash": { "$ref": "common.schema.json#/$defs/sha256Hash" },
+    "decision_trace_hash": { "$ref": "common.schema.json#/$defs/sha256Hash" },
+    "tool_invocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool_did", "request_hash", "response_hash", "timestamp"],
+        "additionalProperties": false,
+        "properties": {
+          "tool_did": { "$ref": "common.schema.json#/$defs/didKey" },
+          "mcp_server_uri": { "type": "string", "minLength": 1 },
+          "request_hash":  { "$ref": "common.schema.json#/$defs/sha256Hash" },
+          "response_hash": { "$ref": "common.schema.json#/$defs/sha256Hash" },
+          "timestamp": { "$ref": "common.schema.json#/$defs/rfc3339Timestamp" }
+        }
+      }
+    },
+    "witness_signatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["witness_did", "signature"],
+        "additionalProperties": false,
+        "properties": {
+          "witness_did": { "$ref": "common.schema.json#/$defs/didKey" },
+          "signature": { "$ref": "common.schema.json#/$defs/base64Ed25519Signature" }
+        }
+      }
+    }
+  }
+}

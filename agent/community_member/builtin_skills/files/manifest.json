@@ -1,0 +1,7 @@
+{
+  "name": "files",
+  "version": "1.0.0",
+  "description": "Read, write, and list text files inside the agent's private workspace.",
+  "capabilities": ["fs.read", "fs.write"],
+  "builtin": true
+}

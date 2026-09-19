@@ -1,0 +1,7 @@
+{
+  "name": "datetime",
+  "version": "1.0.0",
+  "description": "Tell the current UTC date and time. No capabilities required.",
+  "capabilities": [],
+  "builtin": true
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Org console</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #0b0d12; color: #e6e8ee;
+             font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      header.top { padding: 18px 22px; border-bottom: 1px solid #1c212c; display: flex; gap: 12px; align-items: baseline; }
+      header.top h1 { margin: 0; font-size: 16px; font-weight: 600; }
+      .muted { color: #8b90a0; }
+      main { padding: 18px 22px; display: grid; gap: 18px; max-width: 1100px; }
+      .panel { border: 1px solid #1c212c; border-radius: 10px; padding: 14px 16px; background: #0e1118; }
+      .panel h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #8b90a0; }
+      #panel-approvals { border-color: #2b3550; background: #0d1220; }
+      .empty { color: #8b90a0; padding: 10px 0; }
+      .empty.warn { color: #f5c377; border-left: 2px solid #f5c377; padding-left: 12px; }
+      .empty.warn p { color: #b6bccb; margin: 6px 0 0; }
+      table.grid { width: 100%; border-collapse: collapse; }
+      table.grid th { text-align: left; font-weight: 500; color: #8b90a0; font-size: 12px; padding: 4px 8px 8px 0; }
+      table.grid td { padding: 6px 8px 6px 0; border-top: 1px solid #161b25; }
+      .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; background: #4a5163; }
+      .dot-running, .dot-active { background: #4ade80; }
+      .dot-error, .dot-stopped { background: #fb7185; }
+      ul.tasks, ul.receipts { list-style: none; margin: 0; padding: 0; }
+      ul.tasks li, ul.receipts li { padding: 6px 0; border-top: 1px solid #161b25; display: flex; gap: 8px; align-items: baseline; }
+      .task-state, .cat { font-size: 11px; border: 1px solid #2b3550; border-radius: 5px; padding: 1px 6px; color: #a7b0c6; }
+      .approval-list { display: grid; gap: 10px; }
+      .approval { border: 1px solid #2b3550; border-radius: 8px; padding: 12px 14px; background: #10151f; }
+      .approval header { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+      .kind { font-size: 11px; border: 1px solid #4a5a86; border-radius: 5px; padding: 1px 7px; color: #b7c4e6; }
+      .summary { margin: 4px 0 8px; }
+      .fields { display: grid; gap: 3px; margin-bottom: 10px; }
+      .field { display: flex; gap: 10px; font-size: 12px; }
+      .field-k { color: #8b90a0; min-width: 110px; }
+      .field-v { color: #cfd5e3; word-break: break-word; }
+      .approval footer { display: flex; gap: 8px; }
+      button { font: inherit; border-radius: 6px; padding: 5px 12px; border: 1px solid #2b3550;
+               background: #161c28; color: #e6e8ee; cursor: pointer; }
+      button.approve { border-color: #2f6b46; background: #14301f; }
+      button.reject { border-color: #6b2f3a; background: #2c1218; }
+      code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a7b0c6; }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <h1>Org console</h1>
+      <span class="muted" id="org-name"></span>
+    </header>
+    <main id="root">
+      <p class="muted">Loading…</p>
+    </main>
+    <script type="module" src="/ui/console-boot.js"></script>
+  </body>
+</html>

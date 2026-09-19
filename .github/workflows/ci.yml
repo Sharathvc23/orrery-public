@@ -1,0 +1,1336 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref (a new push to a PR kills the
+# in-flight run) — the biggest single source of wasted Actions minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# All subsystems build & test — but each heavy job is gated on the paths it
+# actually covers (see the `changes` job), so a docs/config-only PR runs only
+# the light always-on guards + the aggregate gate. The single required check is
+# `ci gate`: it always runs and is green iff every job succeeded or was skipped
+# (never on a real failure), so a path-filtered job can never wedge a PR in
+# "expected / waiting" the way a directly-required conditional job would.
+# GITHUB_TOKEN scope. Without this block the token defaults to WRITE-ALL
+# (contents/issues/pull-requests write), so any PR that achieves code execution in
+# CI could push commits, cut releases, or edit issues.
+#
+# `contents: read` — not `read-all` — because that is the only scope any job here
+# actually consumes: every job's steps are checkout + setup-python/node + shell.
+# Verified per job rather than assumed: no job in this file runs `gh`, `git push`,
+# actions/github-script, a release action, or reads GITHUB_TOKEN; the `gate` job
+# only reads `needs.*.result`. Caches and setup-* need no token scope.
+#
+# If a future job genuinely needs to write, give THAT JOB its own `permissions:`
+# block — and note a job-level block REPLACES this one rather than merging, so it
+# must restate `contents: read` for actions/checkout.
+permissions:
+  contents: read
+
+jobs:
+  # ── Change detection ───────────────────────────────────────────────────────
+  # Native git-diff (no third-party action): which subtrees changed on this PR
+  # / push. Fail-safe: if the base can't be resolved (first push, force-push,
+  # shallow) OR the CI workflow itself changed, every group is forced true so we
+  # never skip a job that should have run.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      index: ${{ steps.f.outputs.index }}
+      smb_host: ${{ steps.f.outputs.smb_host }}
+      skill: ${{ steps.f.outputs.skill }}
+      agent: ${{ steps.f.outputs.agent }}
+      server: ${{ steps.f.outputs.server }}
+      renderer: ${{ steps.f.outputs.renderer }}
+      smb_funnel: ${{ steps.f.outputs.smb_funnel }}
+      smb_signup: ${{ steps.f.outputs.smb_signup }}
+      conformance: ${{ steps.f.outputs.conformance }}
+      installer: ${{ steps.f.outputs.installer }}
+      two_agent_demo: ${{ steps.f.outputs.two_agent_demo }}
+      e2e: ${{ steps.f.outputs.e2e }}
+      mcp_server: ${{ steps.f.outputs.mcp_server }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: f
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          if [ -n "${BASE_SHA:-}" ]; then base="$BASE_SHA"; head="${HEAD_SHA:-HEAD}";
+          else base="${BEFORE:-}"; head="HEAD"; fi
+          run_all=0
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "base '$base' unresolvable — running EVERYTHING (fail-safe)"; run_all=1; files="";
+          else
+            files="$(git diff --name-only "$base" "$head")"
+          fi
+          echo "changed files:"; printf '%s\n' "$files"
+          if printf '%s\n' "$files" | grep -qxE '\.github/workflows/ci\.yml'; then
+            echo "CI workflow changed — running EVERYTHING"; run_all=1;
+          fi
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; echo "  $1=$2"; }
+          hit()  { printf '%s\n' "$files" | grep -qE "$1"; }
+          if [ "$run_all" = 1 ]; then
+            for g in index smb_host smb_signup smb_funnel skill agent server renderer conformance installer e2e mcp_server two_agent_demo; do emit "$g" true; done
+            exit 0
+          fi
+          hit '^index/'                                                                  && emit index true       || emit index false
+          # smb_host imports the community_member package, so an agent change can
+          # break it — run its suite when EITHER subtree changes.
+          #
+          # It also reads smb_funnel/tests/host_contract.json — the refusal contract
+          # the funnel's mock and this host are BOTH asserted against. That file is
+          # the interlock that stops the two drifting apart, so editing it must
+          # re-run this suite as well as the funnel's; a pin only one side checks
+          # is what let them diverge in the first place.
+          hit '^(smb_host/|agent/|smb_funnel/tests/host_contract\.json)'                  && emit smb_host true    || emit smb_host false
+          # smb_funnel's XSS tests drive the funnel's real render path through the
+          # reference renderer's recording stub DOM (the one that throws on
+          # innerHTML), rather than hand-copying a second security fixture. That
+          # makes the stub a shared dependency, so editing it must re-run this
+          # suite too — otherwise the guard only ever sees one side, the same
+          # hole the schema/ and vectors/ filters above were widened to close.
+          # ...and tests/host-states.test.mjs and tests/browser-cors.test.mjs boot a
+          # REAL smb_host and a REAL smb_signup and drive the app against them, so
+          # a change to either service can redden this suite without touching the
+          # funnel's own directory. Same widening as the two filters above.
+          hit '^(smb_funnel/|renderer/tests/stubdom\.mjs|smb_host/|smb_signup/|agent/)'      && emit smb_funnel true  || emit smb_funnel false
+          # The signup façade drives a REAL smb_host in-process and serves the
+          # smb_funnel bundle, so a change to either can break it without touching
+          # its own directory — the same widening the two filters above already
+          # carry, for the same reason.
+          # scripts/browser_smb_funnel.py drives smb_signup in a real browser
+          # (case E: the cross-origin shape the front door does not serve), so an
+          # edit to that script must wake the browser job below — which is
+          # gated on these outputs and on nothing that would otherwise match it.
+          hit '^(smb_signup/|smb_host/|smb_funnel/|agent/|scripts/browser_smb_funnel\.py)'  && emit smb_signup true  || emit smb_signup false
+          hit '^skill/'                                                                  && emit skill true       || emit skill false
+          # Same shape one subtree over: agent embeds a byte-for-byte mirror of
+          # vectors/signing/ (community_member/_conformance_vectors), locked by
+          # agent/tests/test_conformance_boot.py. A vectors-only edit skipped
+          # that guard entirely until this filter included vectors/.
+          hit '^(agent/|scripts/|vectors/)'                                              && emit agent true       || emit agent false
+          # server hand-mirrors closed enums out of schema/0.4 (a2ui_helpers
+          # _*_ENUM, surface_composer.KNOWN_COMPONENTS), guarded by
+          # server/tests/test_a2ui_mirrored_enums.py. A schema-only edit is
+          # exactly the drift that guard exists to catch, so it must run the
+          # server suite too — otherwise the guard only ever sees one side.
+          # ...and the console UI's adversarial tests import the reference
+          # renderer's stub DOM rather than hand-copying a second security
+          # fixture, so editing that stub must re-run this suite too.
+          # ...and conformance/federation/ measures server/federation_intelligence.py
+          # and server/routes/ against the PUBLISHED sm-federation profile. It runs
+          # in THIS job (it needs the booted app), so both sides of that pair have
+          # to trigger it: a server-only edit that breaks conformance, and an edit
+          # to the claims/field-map/pin that changes what conformance means. Listing
+          # only one side is the hole this filter block keeps being widened to close.
+          # ...and orrery-up, because the installer's port and .env tests live in
+          # server/tests/test_deploy_surface_reality.py: an edit to the installer
+          # alone used to run the live installer job and skip the suite that
+          # names its invariants.
+          hit '^(server/|scripts/|schema/|conformance/federation/|renderer/tests/stubdom\.mjs|docker-compose\.yml|orrery-up)' && emit server true || emit server false
+          hit '^renderer/'                                                               && emit renderer true    || emit renderer false
+          hit '^(conformance/|schema/|vectors/|agent/|skill/)'                           && emit conformance true || emit conformance false
+          # renderer/ is in this list because the installer now SERVES it: the
+          # banner asserts the renderer answers 200 and the lifecycle check
+          # asserts `down` releases its port, so a change under renderer/ can
+          # redden this job. scripts/installer_lifecycle_check.py is here for
+          # the plainer reason that nothing else runs it.
+          hit '^(server/|agent/|infra/|renderer/|scripts/installer_[a-z_]+_check\.py|orrery-up|docker-compose\.yml|\.env\.example)' && emit installer true || emit installer false
+          hit '^(server/|agent/|renderer/|infra/|scripts/|docker-compose\.yml|\.env\.example)' && emit e2e true    || emit e2e false
+          # The two-agent demo boots two orgs and two agent processes and drives
+          # the delegated call, its verifiers and its four refusals end to end.
+          # It is path-gated because that boot is the same cost as the e2e job,
+          # and the paths are everything the demo executes: the agent runtime
+          # and its CLI, the org server, the compose files, the JS verifiers.
+          hit '^(agent/|server/|infra/|docker-compose\.yml|smb_funnel/(src/|verify|verify_cosign)|scripts/demo_two_agents\.sh)' && emit two_agent_demo true || emit two_agent_demo false
+          # mcp_server imports the installed community_member package (every
+          # tool wraps an existing agent function), the same coupling
+          # smb_host has to agent/ — run its suite when EITHER subtree
+          # changes, or a wrapper could drift from what it wraps unseen.
+          hit '^(mcp_server/|agent/)'                                                   && emit mcp_server true  || emit mcp_server false
+
+  # Supply-chain pin guard (R3): a dependency ref that points at a
+  # moving branch lets a push to any upstream repo silently mutate Orrery.
+  # Every git URL in a manifest, workflow, or Dockerfile must pin a full
+  # 40-hex commit SHA, and the constraints files must stay exact (==) for the
+  # sm-* family. This job is the regression guard the issue requires. It is a
+  # LIGHT always-on guard — never path-gated — so every PR is pin-checked.
+  supply-chain-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Every git URL dependency ref pins a full commit SHA
+        run: |
+          set -euo pipefail
+          hits=$(grep -rnE 'git\+' \
+            --include='*.txt' --include='*.toml' --include='*.yml' --include='*.yaml' --include='Dockerfile*' \
+            --exclude-dir='.git' --exclude-dir='node_modules' --exclude-dir='__pycache__' --exclude-dir='.venv' \
+            . || true)
+          bad=$(printf '%s\n' "$hits" | grep -vE 'git\+https://[^ "'\''@]+@[0-9a-f]{40}' | grep -v '^$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::unpinned git URL dependency ref(s) — pin a full 40-hex commit SHA:"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+          echo "OK: every git URL dependency ref pins a full commit SHA"
+      # Sibling of the git-URL check above, for the other kind of moving ref.
+      # `image: foo:latest` (or any bare tag) resolves to whatever the registry
+      # points at on the day it is pulled, so an upstream push mutates the stack
+      # exactly the way an unpinned branch ref does. Every compose service that
+      # names an image pins it by digest today — this is what keeps that true.
+      # It was NOT covered before: the check above matches VCS dependency URLs
+      # in manifests and Dockerfiles and never looked at a compose `image:` line.
+      #
+      # ⚠️ Do not write that URL scheme literally in this file. The check above
+      # scans every *.yml in the tree for it, comments included, so naming it
+      # here turns this workflow into its own unpinned-reference finding.
+      - name: Every compose image pins a digest
+        run: |
+          set -euo pipefail
+          images=$(grep -rnE '^[[:space:]]*image:' \
+            --include='docker-compose*.yml' --include='compose*.yml' \
+            --exclude-dir='.git' --exclude-dir='node_modules' \
+            . || true)
+          if [ -z "$images" ]; then
+            echo "::error::no compose image: lines found — this scan has stopped looking at anything"
+            exit 1
+          fi
+          bad=$(printf '%s\n' "$images" | grep -vE '@sha256:[0-9a-f]{64}' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::compose image(s) not pinned by digest — append @sha256:<64-hex>:"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+          printf '%s\n' "$images" | sed 's/^/  /'
+          echo "OK: every compose image pins a digest"
+      - name: Every Dockerfile base image pins a digest
+        # The compose check above never reads a Dockerfile. All five bases
+        # (server, agent, db, index, smb-host) were already pinned by hand —
+        # this makes that a rule rather than a habit. `FROM <stage>` references
+        # to an earlier build stage carry no digest and are exempt by name.
+        run: |
+          set -euo pipefail
+          froms=$(grep -rnE '^[[:space:]]*FROM[[:space:]]' \
+            --include='Dockerfile' --include='Dockerfile.*' --include='*.Dockerfile' \
+            --exclude-dir='.git' --exclude-dir='node_modules' \
+            . || true)
+          if [ -z "$froms" ]; then
+            echo "::error::no Dockerfile FROM lines found — this scan has stopped looking at anything"
+            exit 1
+          fi
+          stages=$(printf '%s\n' "$froms" | grep -oiE ' AS [A-Za-z0-9_.-]+' | awk '{print tolower($2)}' | sort -u || true)
+          bad=""
+          while IFS= read -r line; do
+            image=$(printf '%s' "$line" | sed -E 's/^[^:]+:[0-9]+:[[:space:]]*FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?//' | awk '{print tolower($1)}')
+            if printf '%s\n' "$stages" | grep -qxF "$image"; then continue; fi
+            case "$image" in
+              *@sha256:*) ;;
+              *) bad="$bad$line"$'\n' ;;
+            esac
+          done <<< "$froms"
+          if [ -n "$bad" ]; then
+            echo "::error::Dockerfile base image(s) not pinned by digest — append @sha256:<64-hex>:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+          printf '%s\n' "$froms" | sed 's/^/  /'
+          echo "OK: every Dockerfile base image pins a digest"
+      - name: Every pinned dependency carries an MIT-compatible license (self-test first, then gate)
+        # Offline: the gate reads scripts/license_manifest.json, which
+        # --refresh writes from PyPI metadata and which is reviewed like code.
+        # A pin the manifest has never seen, a license PyPI left blank, or any
+        # copyleft/proprietary expression fails by name. docs/LICENSES.md is the
+        # human-readable rendering of the same manifest.
+        run: |
+          python3 scripts/license_gate.py --self-test
+          python3 scripts/license_gate.py
+      - name: No internal references (self-test first, then scan)
+        run: |
+          set -euo pipefail
+          # The self-test runs FIRST and gates the scan: a scanner whose patterns
+          # have stopped matching would otherwise report a clean tree, which is the
+          # failure shape this repo has paid for more than once.
+          python3 scripts/internal_reference_gate.py --self-test
+          python3 scripts/internal_reference_gate.py
+      - name: No aspirational infrastructure claimed as operating (self-test first, then scan)
+        run: |
+          set -euo pipefail
+          # Sibling of the reference gate: that one detects a reference a reader
+          # cannot resolve, this one detects a claim whose subject does not
+          # exist. Same ordering — the self-test gates the scan — and its
+          # self-test also carries must-not-match cases, so a pattern that
+          # widened into correct prose fails here rather than in review.
+          python3 scripts/claims_language_gate.py --self-test
+          python3 scripts/claims_language_gate.py
+      - name: No committed conflict markers (self-test first, then scan)
+        run: |
+          set -euo pipefail
+          # A conflict marker reached main and passed every check here, because
+          # none of them looked for one. Mechanical rather than editorial, so it
+          # is a separate module from the two prose gates. Its self-test carries
+          # the setext-heading cases that a naive `grep '^======='` would fail on.
+          python3 scripts/conflict_marker_gate.py --self-test
+          python3 scripts/conflict_marker_gate.py
+      - name: No retired product vocabulary in prose or on screen (self-test, plant proof, then scan)
+        run: |
+          set -euo pipefail
+          # Fourth gate. The other three are about a reference, a claim and a
+          # file; this one is about a name — the product noun is org, and
+          # "chapter" survives only as a frozen wire id, an internal module name,
+          # the protocol's own name, or a real artifact name.
+          #
+          # It reads TWO things, because reading prose alone was a blind spot
+          # that shipped: the first-run wizard said "Pick a chapter" on screen
+          # while this gate reported OK over 62 markdown files. It now also reads
+          # the strings a human is actually shown — A2UI component arguments,
+          # wizard step specs, and terminal-UI output — recognised through the
+          # AST so that identifiers, comments and log lines stay out by
+          # construction rather than by a pattern that has to keep guessing.
+          #
+          # Three steps rather than two. The plant proof is the extra one, and it
+          # is the one that matters here: this gate's whole content is its
+          # discrimination rule, so proving it fires is only half a proof. The
+          # plant writes drift AND every legitimate form into a real tracked
+          # prose file and a real tracked module, runs the full pipeline over the
+          # real `git ls-files` output, and requires each planted string caught at
+          # its line and the rest ignored.
+          python3 scripts/org_vocabulary_gate.py --self-test
+          python3 scripts/org_vocabulary_gate.py --prove
+          python3 scripts/org_vocabulary_gate.py
+      - name: Security audit status is checkable (self-test first, then scan)
+        run: |
+          set -euo pipefail
+          # Fifth gate, and the one that guards the security document itself.
+          # AUDIT_HARSH.md carried 62 findings whose status lived in prose, and
+          # nothing compared those words to anything: 26 of the 35 Medium and Low
+          # findings carried no status at all, and two live public HTTP surfaces
+          # (smb_host, smb_signup) were absent from the document entirely.
+          #
+          # This asserts five things: every finding in the prose is in the checked
+          # set; status comes from a closed vocabulary; anything claiming `fixed`
+          # or `mitigated` cites evidence that exists on disk; every component
+          # directory is declared in docs/audit/SCOPE.md; and the pinned SHA is
+          # reported against HEAD so "audited" cannot quietly mean "audited months
+          # ago".
+          #
+          # --self-test plants a violation of each rule and asserts rejection, so
+          # a green run means the rules hold rather than that the checks did
+          # nothing.
+          python scripts/audit_gate.py --self-test
+
+      - name: Constraints files stay exact and consistent
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+
+          ok = True
+          pins: dict[str, dict[str, str]] = {}
+          for path in ("server/constraints.txt", "agent/constraints.txt"):
+              pins[path] = {}
+              for line in open(path):
+                  line = line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  m = re.fullmatch(r"(sm-[a-z0-9-]+)==(\d+\.\d+\.\d+)", line)
+                  if not m:
+                      print(f"::error::{path}: not an exact sm-* pin: {line!r}")
+                      ok = False
+                  else:
+                      pins[path][m.group(1)] = m.group(2)
+              if not pins[path]:
+                  print(f"::error::{path}: no sm-* pins found")
+                  ok = False
+
+          # The exact pins in server/constraints.txt must appear verbatim in
+          # server/requirements.txt (the deploy image's install source).
+          req = open("server/requirements.txt").read()
+          for name, ver in pins.get("server/constraints.txt", {}).items():
+              if f"{name}=={ver}" not in req:
+                  print(f"::error::server/requirements.txt drifted from constraints: expected {name}=={ver}")
+                  ok = False
+
+          sys.exit(0 if ok else 1)
+          EOF
+
+  # ── Repository documentation guards ────────────────────────────────────────
+  # LIGHT and always-on — never path-gated, and that is the point of it.
+  #
+  # These guards assert properties of the repository's front-door pages
+  # (SECURITY.md, CODE_OF_CONDUCT.md, the issue templates). The change that
+  # breaks one of them is a DOCS-ONLY pull request, and every heavy job above is
+  # filtered on a subtree such a pull request does not touch. A guard living in
+  # `server/tests/` would therefore be skipped by exactly the change it exists
+  # to catch — the half-skipped interlock this repository has found in its own
+  # instruments before.
+  #
+  # Selected by DIRECTORY, not by a list of modules, so the next root-level
+  # documentation guard cannot land unrun.
+  doc-guards:
+    name: repository doc guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - name: Documentation guards
+        run: python3 -m pytest tests/ -v
+
+  index:
+    needs: changes
+    if: needs.changes.outputs.index == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: index
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install fastapi uvicorn httpx pytest pytest-cov ruff==0.15.13 mypy cryptography jcs base58
+      - name: ruff lint
+        run: ruff check .
+      - name: mypy (strict, R2)
+        run: mypy
+      # Coverage floor (R1): baseline 95.1% on main.py at floor time.
+      # attestation_gate.py (F2 stage 2) is held to the same floor.
+      - run: python -m pytest -q --cov=main --cov=attestation_gate --cov-fail-under=93
+
+  # SMB host (B2b-1): a multi-tenant no-infra host that provisions isolated SMB
+  # agents and makes them resolvable on the lean Index. It depends on the
+  # installed community_member package, so the job installs the agent lockfile +
+  # package, then runs the host's own lint/type/test — including the end-to-end
+  # provision → register → resolve → card test (which boots a real lean Index
+  # subprocess).
+  smb_host:
+    needs: changes
+    if: needs.changes.outputs.smb_host == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      # community_member (orrery-agent) is the dependency; the lockfile is the
+      # single source of installed truth (mirrors the `agent` job).
+      - run: pip install -r agent/requirements.lock -r agent/requirements-dev.lock && pip install -e ./agent --no-deps && pip install ruff==0.15.13
+      - name: ruff lint
+        run: ruff check .
+        working-directory: smb_host
+      - name: ruff format check
+        run: ruff format --check .
+        working-directory: smb_host
+      - name: mypy (strict, R2)
+        run: mypy
+        working-directory: smb_host
+      - name: end-to-end provision → resolve → card + multi-tenant + graceful
+        run: python -m pytest -q
+        working-directory: smb_host
+
+  # MCP server: six accountability primitives (identity, consent, receipts,
+  # peer resolution) over stdio, wrapping the installed community_member
+  # package the same way smb_host does. Driven by TWO oracles neither of
+  # which is code this repository wrote — the stock `mcp` SDK client and
+  # langchain-mcp-adapters — so an interop drift shows up here the way an
+  # in-repo-only client would have missed it (see mcp_server/README.md).
+  mcp_server:
+    needs: changes
+    if: needs.changes.outputs.mcp_server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      - run: pip install -r agent/requirements.lock -r agent/requirements-dev.lock && pip install -e ./agent --no-deps && pip install "mcp>=1.24.0,<2.0.0" "langchain-mcp-adapters>=0.3.0,<0.4" ruff==0.15.13
+      - name: ruff lint
+        run: ruff check .
+        working-directory: mcp_server
+      - name: ruff format check
+        run: ruff format --check .
+        working-directory: mcp_server
+      - name: mypy (strict, R2)
+        run: mypy
+        working-directory: mcp_server
+      - name: unit tests + stock-SDK oracle + langchain-mcp-adapters oracle
+        run: python -m pytest -q
+        working-directory: mcp_server
+
+  skill:
+    needs: changes
+    if: needs.changes.outputs.skill == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skill
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx base58 cryptography pytest ruff==0.15.13 mypy
+      - name: ruff lint
+        run: ruff check .
+      - name: mypy (strict on shipped helpers, R2)
+        run: mypy
+      - run: python -m pytest -q
+
+  agent:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      # the lockfile is the single source of installed truth — full
+      # freeze at current stable (constraints.txt still guards the sm-* pins).
+      # requirements.lock is what the image ships; requirements-dev.lock adds the
+      # test runner, linter and type checker, which the image must never carry.
+      - run: pip install -r requirements.lock -r requirements-dev.lock && pip install -e . --no-deps
+      # A2A interop oracle. Test-only and deliberately NOT in requirements.lock:
+      # it is someone else's client used to check our server, not something this
+      # package ships. Installed here so the interop test actually RUNS —
+      # importorskip means a missing dependency would make it skip silently, and
+      # a guard nobody runs is the failure it exists to prevent.
+      - run: pip install a2a-sdk==1.1.2
+      - name: ruff lint
+        run: ruff check .
+      - name: ruff format check
+        run: ruff format --check .
+      - name: mypy (projectnanda surface modules)
+        run: mypy
+      # Coverage floors (R1): global via --cov-fail-under (baseline 77.4%
+      # at floor time), security-critical modules via scripts/coverage_gate.py.
+      - run: python -m pytest -q --cov=community_member --cov-report=json:coverage.json --cov-fail-under=76
+      - name: security-module coverage floors
+        run: python ../scripts/coverage_gate.py --suite agent coverage.json
+
+  # The agent IMAGE, against a volume it did not write.
+  #
+  # Nothing built this Dockerfile in CI, and every stack test starts from a fresh
+  # volume, so the ownership of the mount always matched the process running.
+  # That is how a container-hardening change (USER orrery, uid 10001) shipped
+  # while every deployed agent's volume was still root-owned from before it:
+  # the image could not read its own keystore and crashed on boot, and no gate
+  # here could see it. This job is the upgrade case those tests cannot express.
+  agent_volume_adoption:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Boot the agent image over a volume owned by another uid
+        run: python3 scripts/agent_volume_adoption_probe.py
+
+  server:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.lock
+      # install the LOCKFILE — the exact runtime set the release image
+      # ships — plus the test toolchain. requirements.txt keeps the intent
+      # (floors + sm-* pins); requirements.lock is the resolved truth.
+      - run: pip install -r requirements.lock pytest pytest-asyncio pytest-cov ruff==0.15.13 mypy
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      # PR9: the org console renders agent-supplied names, task titles, approval
+      # payloads and receipt fields. Adversarial render tests drive the REAL
+      # render path under a stub DOM that throws on innerHTML, plus a static
+      # audit banning the sinks — the same two layers as smb_funnel and
+      # renderer/. Explicit file list: `node --test <dir>` passes on node 20 and
+      # fails on the node 22 pinned here.
+      - name: Console UI — XSS render + source-sink guard
+        run: node --test static/tests/*.test.mjs
+      - name: ruff lint
+        run: ruff check .
+      - name: mypy (auth/crypto modules, R2)
+        run: mypy
+      # Coverage floors (R1): global via --cov-fail-under (baseline 69.7%
+      # at floor time, tests + vendored _arp_verify excluded via pyproject),
+      # security-critical modules via scripts/coverage_gate.py.
+      # Run through the wrapper so a fatal-signal exit is legible: a
+      # SIGSEGV kills pytest before it prints a summary, leaving an exit-139
+      # job with nothing to read, which trains people to hit re-run. The
+      # wrapper adds an explanation only — it does NOT retry and does NOT
+      # change the exit code.
+      - run: ../scripts/run_server_tests.sh -q --cov=. --cov-report=json:coverage.json --cov-fail-under=68
+      - name: security-module coverage floors
+        run: python ../scripts/coverage_gate.py --suite server coverage.json
+      # sm-federation 0.1 conformance. Installed here rather than in the
+      # `conformance` job because the suite boots the real app: it asserts what
+      # Orrery SERVES, not what a route table says. The pin is a full 40-hex SHA
+      # (supply-chain-pins enforces that); federation-canary.yml runs the same
+      # suite against sm-federation@main so a change made in the OTHER repo
+      # surfaces without waiting for someone to bump the pin here.
+      - name: Install the pinned published federation profile
+        working-directory: ${{ github.workspace }}
+        run: pip install -r conformance/federation/requirements.txt
+      - name: sm-federation 0.1 conformance (published schemas vs the booted app)
+        working-directory: ${{ github.workspace }}
+        run: python -m pytest conformance/federation -q
+
+  # Reference renderer: framework-free ES modules, zero npm
+  # dependencies (nothing to install or pin — the node:test built-in runner
+  # is the whole toolchain, keeping the R3 supply-chain surface at zero).
+  # The suite includes the hostile-payload injection fixture that must
+  # render inert, and a static source audit banning HTML/eval sinks.
+  renderer:
+    needs: changes
+    if: needs.changes.outputs.renderer == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: renderer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Renderer unit + injection tests
+        # Explicit shell-expanded file list: `node --test <dir>` resolves
+        # differently between node 20 and 22 (22 treats positionals as
+        # globs and chokes on a trailing-slash directory).
+        run: node --test tests/*.test.mjs
+
+  # The SMB funnel is static, framework-free JS (package.json type:module), no
+  # build. Validated by node --check (syntax on every module) + the in-process
+  # smoke: provision → book → verify the receipt offline → tamper-reject.
+  smb_funnel:
+    needs: changes
+    if: needs.changes.outputs.smb_funnel == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: smb_funnel
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      # tests/host-states.test.mjs and tests/browser-cors.test.mjs drive the app
+      # against a REAL smb_host and a REAL smb_signup rather than a hand-written
+      # stand-in, so this job needs the host's interpreter. They REFUSE rather
+      # than skip when it is missing (see tests/hostboot.mjs `requireHost`): a
+      # suite whose whole claim is "this had never been driven against the real
+      # thing" must not report green on a runner where the real thing was absent.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      - name: Install the host the funnel is driven against
+        working-directory: ${{ github.workspace }}
+        run: pip install -r agent/requirements.lock && pip install -e ./agent --no-deps
+      - name: Syntax-check every module
+        run: for f in src/*.js tests/*.mjs *.mjs; do node --check "$f"; done
+      # XSS regression (G3 / AUDIT_HARSH C7 + H13): the adversarial render tests
+      # push a script tag and quotes through the real render path under a stub
+      # DOM that throws on innerHTML, plus a static audit banning the sinks
+      # outright. Two layers on purpose — the first proves today's path is safe,
+      # the second proves no future one is unsafe.
+      # Same explicit shell-expanded file list as the renderer job above, and for
+      # the same reason: `node --test tests/` passes on node 20 and fails on the
+      # node 22 this job pins.
+      - name: XSS render + source-sink guard, and the six real host states
+        run: node --test tests/*.test.mjs
+      - name: Smoke — provision → book → verify → tamper
+        run: node smoke.mjs
+
+  # Gate the protocol artifacts that previously had no CI: every JSON
+  # Schema under schema/** is meta-validated and actually loaded by code (the
+  # 0.3/0.4 a2ui schemas were only hand-mirrored in comments → drift risk),
+  # the deterministic ARP vector generator is run and checked against the ARP
+  # receipt schema (generator↔schema can't drift), and the skill bundle's
+  # manifest instance is validated against the skill-manifest schema.
+  conformance:
+    needs: changes
+    if: needs.changes.outputs.conformance == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      # jcs: ARP vector generator. httpx: orrery's skill/helpers/sign_request.py
+      # (imported by the openclaw-skill signing adapter). PyNaCl: the member SDK;
+      # pin it to agent/requirements.lock. sm-conformance: the badge builder the
+      # runtime serves — the emitted-badge conformance gate in
+      # test_advertised_surfaces_conform.py validates its output, so it must be
+      # importable here. Pinned to the version server/requirements.txt ships.
+      - run: pip install jsonschema referencing cryptography base58 jcs httpx PyNaCl==1.6.2 pytest ruff==0.15.13 sm-conformance==0.3.2
+      - name: ruff lint
+        run: ruff check conformance/tests conformance/client conformance/federation
+      # Run as modules (not scripts): the VRP generator does `from
+      # conformance.vrp import ...`, which only resolves when the repo root
+      # is on sys.path — i.e. via `-m` from the repo root, not `python file.py`.
+      - name: Generate deterministic test vectors
+        run: |
+          python -m conformance.arp._vector_gen
+          python -m conformance.vrp._cosign_vector_gen
+      - name: Validate schemas, vectors, and the skill manifest
+        run: python -m pytest conformance/tests -q
+      # Client signing-conformance: require each of Orrery's three shipped
+      # implementations in a separate process against the same five checks.
+      # These are three implementations of one suite, not fifteen protocol
+      # checks or a new aggregate conformance claim.
+      - name: Client signing conformance (executable specification)
+        run: python -m pytest conformance/client -q --adapter spec-reference --require-adapter
+      - name: Client signing conformance (orrery's shipped skill)
+        run: python -m pytest conformance/client -q --adapter openclaw-skill --require-adapter
+      - name: Client signing conformance (orrery's member SDK)
+        run: python -m pytest conformance/client -q --adapter member-sdk --require-adapter
+
+  # Installer stage 1: the literal one-command path a fresh user runs.
+  # orrery-up's built-in sign-of-life drill IS the assertion set (/health,
+  # boot badge, member joined, agent card); selftest covers the no-Docker
+  # unit surface (fresh unique secrets, demo-password refusal, idempotency).
+  # The SMB path had unit jobs (smb_host, smb_funnel) but no end-to-end gate:
+  # nothing exercised provision -> live card -> book -> offline verify. Both
+  # demo scripts already proved the path by hand; this runs them on every
+  # change. They were unrunnable in CI until they stopped hardcoding
+  # $ROOT/.venv, which is why the gate did not exist.
+  smb_e2e:
+    needs: changes
+    if: needs.changes.outputs.smb_host == 'true' || needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+      # The lockfile is the single source of installed truth (mirrors `agent`).
+      - run: pip install -r agent/requirements.lock && pip install -e ./agent --no-deps
+      - name: SMB loop - onboard, book, verify offline, reject a tampered receipt
+        run: bash scripts/demo_smb_loop.sh
+      - name: SMB stack - provision on smb_host, live card, book, client verify
+        run: bash scripts/demo_smb_stack.sh
+
+  # ⚠️ THE ONLY JOB THAT OPENS A BROWSER, AND THE REASON IT EXISTS IS MEASURED,
+  # NOT ASSUMED. The CORS defect this repository shipped — Authorization missing
+  # from the host's allowlist, so a gated host was unreachable from a browser WITH a valid
+  # token as much as without one — was invisible to every suite here: the funnel's
+  # wiring test boots the real app.js but a constructed document performs no
+  # preflight; smoke.mjs never touches the network; smb_e2e drives the host with
+  # curl and node, where there is no Origin; and smb_host's own preflight test
+  # asked only for content-type. It took a person opening a browser.
+  #
+  # This job drives the three clicks against the real host on a SEPARATE ORIGIN,
+  # so a preflight is actually performed. Removing Authorization from the host's
+  # allowlist turns it red; that plant is recorded in the PR.
+  #
+  # Cost, measured rather than estimated: the browser is the headless SHELL only
+  # (267 MB, ~14 s cold at the pinned version) rather than full chromium (622 MB,
+  # ~25 s), cached across runs by Playwright version. The drive itself is ~10 s.
+  smb_browser:
+    needs: changes
+    # smb_signup is in the condition because case E drives THE FRONT DOOR in a
+    # browser: it is the service whose deliberate absence of CORS the case is
+    # about, so a change to it can redden this job without touching the funnel
+    # or the host. The same output also covers scripts/browser_smb_funnel.py,
+    # which nothing else here matches.
+    if: needs.changes.outputs.smb_funnel == 'true' || needs.changes.outputs.smb_host == 'true' || needs.changes.outputs.smb_signup == 'true'
+    runs-on: ubuntu-latest
+    env:
+      # Pinned so the cache key is stable and a silent upgrade cannot change what
+      # "a browser" means between runs.
+      #
+      # ⚠️ THIS IS THE PyPI VERSION, AND IT IS NOT THE npm ONE. The first value
+      # here was 1.62.1, read from `npx playwright --version` — the Node package.
+      # PyPI's newest playwright is 1.62.0; there is no 1.62.1, so the install
+      # failed in one second and every later step was skipped. The two ecosystems
+      # publish the same product under numbers that agree often enough to look
+      # interchangeable. Verify a pin by INSTALLING it, not by reading a version
+      # from whichever CLI is on the path.
+      PLAYWRIGHT_VERSION: "1.62.0"
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      - run: pip install -r agent/requirements.lock && pip install -e ./agent --no-deps
+      - run: pip install "playwright==${PLAYWRIGHT_VERSION}"
+      - name: Cache the browser (keyed on the pinned Playwright version)
+        id: browser-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ github.workspace }}/.playwright
+          key: playwright-shell-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
+      # --with-deps only on a miss: the apt step is the slow half, and the cached
+      # path already carries the browser it would have fetched.
+      - name: Install chromium headless shell
+        run: |
+          if [ "${{ steps.browser-cache.outputs.cache-hit }}" = "true" ]; then
+            python -m playwright install-deps chromium
+          else
+            python -m playwright install --with-deps chromium-headless-shell
+          fi
+      - name: The three clicks, in a real browser, against the real host
+        run: PYTHONPATH=agent python3 scripts/browser_smb_funnel.py
+
+  # The public front door. It holds the provisioning credential a static page
+  # cannot, and — the part that matters — it BOUNDS signup: nothing else in this
+  # tree does. Driven at c920702, a loop with a valid token provisioned 60 tenants
+  # in 3.7 s and was never refused, so a façade without a bound would be exactly
+  # as open as publishing the token. Its suite reaches both bounds rather than
+  # reading their constants.
+  smb_signup:
+    needs: changes
+    if: needs.changes.outputs.smb_signup == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      - run: pip install -r agent/requirements.lock -r agent/requirements-dev.lock && pip install -e ./agent --no-deps
+      - name: The front door is bounded, and the bound is reached
+        run: PYTHONPATH=agent:. python3 -m pytest smb_signup/test_main.py -q
+
+  installer:
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILDKIT: 1
+      COMPOSE_DOCKER_CLI_BUILD: 1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: selftest (no Docker)
+        run: ./orrery-up --selftest
+      - name: one command on a clean environment
+        run: ./orrery-up --yes
+      - name: idempotent re-run
+        run: ./orrery-up --yes
+      # Ports are ALLOCATED rather than demanded, which makes a first run work
+      # on a machine that is already serving something. The hazard that comes
+      # with it is re-allocation: the org publishes
+      # did:web:<host>:<port>:agents:<id> and every endpoint under the same
+      # origin, so a port re-chosen each run would rename the org each run. This
+      # asserts the pin end to end — .env byte-identical, ports unchanged, org
+      # identity unchanged — and it checks the ANCHOR first, refusing to compare
+      # an identity that does not contain the port in the first place.
+      #
+      # It also asks resolution DIRECTLY whether each port resolved as `pinned`,
+      # because the downstream comparison alone is not enough: `ensure_env`
+      # appends and never rewrites, so `.env` stayed identical even with the pin
+      # deliberately disabled. A second mechanism held the property up while the
+      # one under test was broken.
+      - name: re-running does not move the org identity (ports allocated once, then pinned)
+        run: python3 scripts/installer_identity_stability_check.py
+      # The banner is the installer's answer to "did it work". It printed
+      # `/api/members`, which answers 401 to exactly the reader it was written
+      # for, and stayed green for as long as it did because the drill POLLED
+      # four URLs and PRINTED a fifth — nothing compared the two lists.
+      # `status` re-runs the drill, and the drill now requests every banner
+      # entry anonymously before printing it, so an auth-gated line here fails
+      # the step rather than the reader's browser. The offline half of the same
+      # guard is tests/test_installer_banner.py, which runs in doc-guards
+      # because this job is path-gated and that one is not.
+      - name: every URL the sign-of-life banner prints is reachable unauthenticated
+        run: ./orrery-up status
+      # THE REASON THE RENDERER IS A COMPOSE SERVICE. It is served by the stack
+      # so that `./orrery-up down` stops it — a static server the installer
+      # spawned itself would be reparented to init and outlive the process that
+      # started it, leaving `down` (a separate invocation) a stale-prone pidfile
+      # or a "kill whatever holds the port" heuristic as its only options.
+      # This asserts the property end to end, and it asserts the ANCHOR FIRST:
+      # every published port is confirmed listening BEFORE the teardown runs,
+      # because a port that never bound is free afterwards for reasons that have
+      # nothing to do with `down`. It leaves the stack down; the teardown below
+      # still runs to drop volumes.
+      - name: ./orrery-up down releases every port it bound, renderer included
+        run: python3 scripts/installer_lifecycle_check.py
+      - name: teardown
+        if: always()
+        run: ./orrery-up down --purge
+
+  # End-to-end smoke: boot the WHOLE stack the way a user runs it
+  # (`docker compose up`, NOT `--wait`, which masks the db-health race) and
+  # exercise the core promise across subsystem boundaries — the gap the
+  # release audit flagged: every other job tests one subsystem in
+  # isolation with fakes; nothing proved an agent can join an org and reach
+  # the portal's data. This job is the regression guard for the P0 auth /
+  # identity / persistence work.
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILDKIT: 1
+      COMPOSE_DOCKER_CLI_BUILD: 1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Stamp build provenance
+        run: echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+      - name: Prepare env (supabase-demo local-dev defaults)
+        run: |
+          cp .env.example .env
+          # The e2e stack now includes the local agent (compose profile) and a
+          # second org (federation drill) — the agent's keystore passphrase is
+          # generated fresh per run.
+          echo "COMMUNITY_MEMBER_PASSPHRASE=$(openssl rand -hex 24)" >> .env
+          # Secrets are sealed at rest and sealing is required, so the
+          # server refuses to start without this. .env.example ships it EMPTY on
+          # purpose — an operator must supply their own — so generate one here,
+          # the same way orrery-up does for a real install.
+          echo "ORRERY_KEY_SECRET=$(openssl rand -hex 32)" >> .env
+          # The server connects as the non-superuser application role, whose
+          # password the database's first-initialisation hook uses to create it.
+          # .env.example ships it EMPTY for the same reason as ORRERY_KEY_SECRET,
+          # so generate one here the way orrery-up does for a real install.
+          echo "APP_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
+          # .env.example now ships ORRERY_PROFILE=prod (safe-by-default), so
+          # cross-origin browser reads need an explicit allowlist. The Portal-UI e2e
+          # serves the renderer on :8600 and its browser fetches the org on :7000 —
+          # allow that origin so the real deployed shape (prod + explicit allowlist)
+          # is what CI exercises, not a dev-wildcard.
+          echo "ALLOWED_ORIGINS=http://localhost:8600" >> .env
+      - name: Boot the stack (org + db + agent + renderer + second org; plain up, no --wait)
+        # `ui` as well as `agent`: the renderer is a service now, and the portal
+        # suite below drives THAT container rather than a static server this job
+        # starts for itself. The distinction is the point — a suite that serves
+        # the files itself proves the files work and says nothing about whether
+        # the thing a user opens after `./orrery-up` can reach the org.
+        run: docker compose -f docker-compose.yml -f infra/compose.e2e-federation.yml --profile agent --profile ui up -d --build
+      - name: Wait for the server to become healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:7000/health >/dev/null 2>&1; then
+              echo "server healthy after ${i} tries"; exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::server never became healthy"; docker compose logs server | tail -80; exit 1
+      - name: /health reports the stamped commit (provenance)
+        run: |
+          got=$(curl -fsS http://localhost:7000/health | jq -r '.git_commit')
+          echo "git_commit=$got expected=$GIT_COMMIT"
+          test "$got" = "$GIT_COMMIT" || { echo "::error::stale-deploy guard broken"; exit 1; }
+      - name: NANDA discovery surfaces serve at runtime (mounted route adapters)
+        # /health + /api/members alone do NOT exercise the routes/*.py adapters. Their
+        # `ca` proxy resolves sys.modules["chapter_agent"], which is absent when the
+        # module runs as `python chapter_agent.py` (__main__) — a runtime-only 500 the
+        # pytest suite cannot catch (it imports the module as "chapter_agent"). Probe
+        # the extracted surfaces here so that regression is caught.
+        run: |
+          set -euo pipefail
+          # conformance.json: boot-generated, self-attested badge — a
+          # fresh compose must serve it with zero operator action.
+          for path in /.well-known/agent.json /agentfacts.json /.well-known/ai-catalog.json /.well-known/did.json /.well-known/conformance.json "/agents/${ORG_ID:-demo-org}"; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:7000${path}")
+            echo "  ${code}  ${path}"
+            test "$code" = "200" || { echo "::error::discovery surface ${path} returned ${code} (route adapter broken at runtime)"; docker compose logs server | tail -60; exit 1; }
+          done
+      - name: Agent joins the org -> appears in the directory AND persists to Postgres
+        run: |
+          set -euo pipefail
+          # 1) register a member (non-TEST id: TEST- is gated from the public
+          #    directory; AUTO_REGISTER defaults to false so no NEST traffic).
+          #    endpoint: the self-serve card URL (points at the org's own
+          #    card server here — a stand-in for a member runtime's public URL).
+          curl -fsS -X POST http://localhost:7000/api/members \
+            -H 'content-type: application/json' \
+            -d '{"agent_id":"e2e-smoke-bot","name":"E2E Smoke Bot","origin":"sovereign","skills":["python"],"endpoint":"http://localhost:7000"}' >/dev/null
+          # 2) it surfaces in the org's member COUNT, and neither of the two
+          #    per-member read surfaces leaks WHO joined to an anonymous caller.
+          #
+          #    This step used to prove registration by fetching
+          #    /api/agents/e2e-smoke-bot/profile and asserting a 200 — which
+          #    worked only because that route answered for every member whether
+          #    or not they had agreed to be published. Using it that way was
+          #    using a membership ORACLE, the same property that let a stranger
+          #    enumerate an org by guessing ids. It is now consent-gated, so the
+          #    assertion is inverted: a member who has not opted in (which this
+          #    bot has not) must be INDISTINGUISHABLE from one who never
+          #    registered. That is a stronger end-to-end assertion than the old
+          #    one, and it is checked against a real deployed stack.
+          count=$(curl -fsS http://localhost:7000/health | jq -r '.members // 0')
+          test "$count" -ge 1 \
+            || { echo "::error::member never reached the org (health reports ${count} members)"; exit 1; }
+          mem=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:7000/api/agents/e2e-smoke-bot/profile)
+          ghost=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:7000/api/agents/no-such-agent-at-all/profile)
+          test "$mem" = "404" \
+            || { echo "::error::a member who never opted in has a public profile (got ${mem}, want 404)"; exit 1; }
+          test "$mem" = "$ghost" \
+            || { echo "::error::membership oracle: registered=${mem} unregistered=${ghost} — they must match"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:7000/api/members)
+          test "$code" = "401" \
+            || { echo "::error::GET /api/members is anonymously enumerable (got ${code}, want 401)"; exit 1; }
+          # 3) ...and persists to Postgres through the agent-native data layer
+          #    (pg_store -> DATABASE_URL; no PostgREST). The persist is
+          #    fire-and-forget, so poll the agents table directly.
+          for i in $(seq 1 20); do
+            if docker compose exec -T db \
+                 psql -U postgres -d orrery -tAc \
+                 "select agent_id from public.agents where agent_id='e2e-smoke-bot'" \
+                 2>/dev/null | grep -q e2e-smoke-bot; then
+              echo "member reached the agents table after ${i} tries"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::member never reached the agents table (join->persist broken)"
+          docker compose logs server | tail -80; exit 1
+      - name: Reference renderer paints a live surface with zero LLM key
+        # The compose env has no LLM key (.env.example ships them empty), so
+        # this is the BYOK-degradation acceptance: deterministic one-shot
+        # fetch renders, AND the AG-UI stream delivers a snapshot the
+        # renderer paints — through the same modules the browser page loads.
+        run: |
+          set -euo pipefail
+          node --version
+          node renderer/tests/e2e_live_probe.mjs http://localhost:7000 digest
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: renderer/package-lock.json
+      - name: Portal UI e2e — install pinned Playwright + Chromium
+        working-directory: renderer
+        # npm ci against the committed lockfile (exact-pinned devDependency,
+        # R3): the only dependency the suite adds, used solely in this job.
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Portal UI e2e — every wired surface page in real Chromium, on the SHIPPED renderer
+        # The renderer is the portal UI, and this job now drives the compose
+        # service a real install gets — not a `python3 -m http.server` this step
+        # starts for itself. That substitution is what makes the run evidence
+        # about the shipped thing: same container, same published port, same
+        # cross-origin relationship to the org, and this job runs
+        # ORRERY_PROFILE=prod with an explicit ALLOWED_ORIGINS, so it exercises
+        # the deny-by-default configuration a deployment actually uses rather
+        # than a dev wildcard.
+        #
+        # The suite derives the page list + auth-gating split from server source
+        # at run time (gen_contract.py) and asserts: all open pages paint, all
+        # gated pages show a readable 401 state, the AG-UI stream goes live,
+        # divergence/badge/health are browser-consumable, the pill-width fix
+        # holds, and the whole run is CORS-clean.
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8600/index.html >/dev/null 2>&1 && break; sleep 2
+          done
+          curl -fsS http://localhost:8600/index.html >/dev/null \
+            || { echo "::error::the renderer service never served its page"; \
+                 docker compose logs renderer | tail -40; exit 1; }
+          ORG_URL=http://localhost:7000 RENDERER_URL=http://localhost:8600 \
+            node --test renderer/tests/e2e/*.e2e.mjs
+      - name: Self-serve member card hop (ORG_HOST39_CARD_BASE unset)
+        # Compose sets no host39 base, so the registry hop must resolve the
+        # member to ITS OWN card URL ({endpoint}/.well-known/agent.json), and
+        # following that URL must serve a real card — the full self-serve hop.
+        run: |
+          set -euo pipefail
+          url=$(curl -fsS http://localhost:7000/agents/e2e-smoke-bot | jq -re '.url')
+          echo "member card url: ${url}"
+          test "$url" = "http://localhost:7000/.well-known/agent.json" \
+            || { echo "::error::self-serve hop produced wrong card URL: ${url}"; exit 1; }
+          curl -fsS "$url" | jq -e '.name' >/dev/null \
+            || { echo "::error::following the self-serve card URL did not yield a card"; exit 1; }
+      # ── Broadened probes: drive the ADVERTISED surfaces the
+      # way real callers do — signed /run, v0.3 intents, keyless digest,
+      # event-bus SSE (post-open event id asserted), disclosure round-trip
+      # verified OFFLINE with the shipped verifier, AAE audit export
+      #, and the two-org federation handshake under full signed-
+      # federation enforcement. Each probe was spot-verified to FAIL under a
+      # planted break (SSE poll disabled / autodiscovery off / agent down).
+      - name: Broadened surface probes (full the flagship-loop suite suite — signed run, intents, digest, SSE, disclosure, AAE, federation, reputation loop, quilt, registry, divergence)
+        run: |
+          # The receipt→reputation probe drives the REAL agent SDK (co-sign
+          # handshake over live A2A) — install it from the lockfile.
+          pip install -r agent/requirements.lock && pip install -e ./agent --no-deps
+          python scripts/e2e_probes.py \
+            --server http://localhost:7000 \
+            --agent http://localhost:8080 \
+            --server2 http://localhost:7001 \
+            --compose "docker compose -f docker-compose.yml -f infra/compose.e2e-federation.yml --profile agent"
+      - name: Quilt delta-feed survives a restart
+        # Runs LAST and alone — it restarts the org container, so it must not
+        # interleave with the probes above. Asserts a delta-only consumer still
+        # converges and next_seq stays monotonic after the restart.
+        run: |
+          python scripts/e2e_probes.py \
+            --server http://localhost:7000 \
+            --only quilt-restart \
+            --compose "docker compose -f docker-compose.yml -f infra/compose.e2e-federation.yml --profile agent"
+      - name: Member record survives a restart — auth guards, co-sign, A2A, catalog
+        # Also restarts the org container, so it runs after the probes above and
+        # before teardown.
+        #
+        # This step exists because the pytest suite structurally CANNOT cover
+        # what it covers. `members[]` is rebuilt from Postgres on every boot, and
+        # three fields the loader did not carry (endpoint, public_key, origin)
+        # were empty for every member on every boot. The key-change guard
+        # then became a no-op, so an UNAUTHENTICATED POST to the open
+        # /api/members replaced a victim's auth key — full account takeover,
+        # after which the legitimate key got key_mismatch. 25 in-process tests
+        # were green throughout: a test whose setup and assertion live in one
+        # process cannot detect a property that only fails across two.
+        #
+        # The probe carries its own two guards against reporting a false pass —
+        # it reads the endpoint back out of Postgres BEFORE restarting (so a row
+        # that was never written aborts instead of passing vacuously), and it
+        # arms an in-memory-only canary member whose survival proves the restart
+        # never happened. Both fired for real during development.
+        run: |
+          python scripts/restart_durability_probe.py \
+            --server http://localhost:7000 \
+            --restart-cmd 'docker compose -f docker-compose.yml -f infra/compose.e2e-federation.yml --profile agent restart server' \
+            --sql-cmd 'docker compose -f docker-compose.yml -f infra/compose.e2e-federation.yml --profile agent exec -T db psql -U postgres -d orrery -tAq'
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.yml -f infra/compose.e2e-federation.yml --profile agent down -v
+
+  # ── Aggregate gate — THE single required status check ──────────────────────
+  # Always runs (if: always()); needs every other job. Green iff each dependency
+  # succeeded OR was skipped (a path-filtered job that didn't run is 'skipped',
+  # which passes). Any 'failure' or 'cancelled' fails the gate. This is what lets
+  # branch protection require ONE check that a docs-only PR can still satisfy.
+  # ── H12: are the pinned versions KNOWN-VULNERABLE? ────────────────────────
+  # supply-chain-pins (above) proves deps are pinned EXACTLY. That is a different
+  # question from whether a pin is safe: a lockfile can hold a vulnerable version
+  # forever and every structural check stays green.
+  #
+  # FAILURE MODE — FAILS THE BUILD, and is wired into `gate`. Stated deliberately:
+  #   * report-only is ignored within a month, so it is not a control.
+  #   * NOT thresholded on HIGH/CRITICAL, which was the obvious alternative.
+  #     pip-audit exposes no severity flag at all (only --ignore-vuln), and OSV
+  #     advisories frequently carry no CVSS rating — so a severity gate would have
+  #     to silently drop unrated advisories, which is the failure it was meant to
+  #     prevent. Fail on any advisory, with a written escape hatch, is honest about
+  #     what it does.
+  #   * ACCEPTED COST, said plainly: this check can go RED WITH NO PR TO BLAME when
+  #     an advisory is published upstream against an already-pinned dep. That is the
+  #     gate-canary/sm-locp shape and it is deliberate here — a known-vulnerable
+  #     dependency SHOULD block merges. The escape hatch below is the pressure valve.
+  #
+  # ALLOWLIST: add the advisory id to .github/pip-audit-ignore.txt with a date, a
+  # reason, and a review date. Entries are passed as --ignore-vuln. An empty file
+  # means nothing is currently accepted, which is the state today.
+  cve-scan:
+    name: dependency CVE scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      # Pinned exactly. An unpinned scanner added to close a supply-chain finding
+      # would be the same defect the finding is about.
+      - run: pip install pip-audit==2.9.0
+      - name: Audit pinned Python dependencies
+        run: |
+          set -euo pipefail
+          ignore=""
+          if [ -s .github/pip-audit-ignore.txt ]; then
+            while read -r id; do
+              case "$id" in ''|'#'*) continue ;; esac
+              ignore="$ignore --ignore-vuln $id"
+            done < .github/pip-audit-ignore.txt
+          fi
+          # Every pinned requirement file in the tree, not the three that were
+          # here first. index/requirements.lock and the federation conformance
+          # pins were never audited; a package on those lists could have carried
+          # an advisory for as long as the job has existed and the job would have
+          # stayed green. tests/test_cve_scan_covers_every_lock.py fails when a
+          # tracked requirements/constraints file is missing from this list.
+          for req in agent/requirements.lock agent/requirements-dev.lock agent/constraints.txt server/requirements.lock server/requirements.txt server/constraints.txt index/requirements.lock conformance/federation/requirements.txt; do
+            echo "::group::pip-audit $req"
+            pip-audit -r "$req" --progress-spinner off $ignore
+            echo "::endgroup::"
+          done
+      - name: Audit renderer npm dependencies
+        working-directory: renderer
+        # npm audit is built in — no extra tool, no token. Uses the committed lockfile.
+        run: npm audit --audit-level=high
+
+  # ── H5 (the enforcement half): secrets cannot reach main unnoticed ────────
+  # The pre-commit hook is the fast path; it runs on a developer's machine and
+  # `--no-verify` bypasses it silently, so it is a convenience, NOT a control.
+  # This job is the control.
+  #
+  # SCOPED TO THE COMMITS THIS PR ADDS, on purpose. A full-history scan reports 217
+  # findings today — 215 from gitleaks' broad `generic-api-key` rule on Ed25519/DAT
+  # test vectors, plus 2 on a BLANK .env.example template. None of gitleaks' ~150
+  # high-confidence rules (AWS keys, private keys, GitHub PATs) match anywhere in
+  # 607 commits. Those findings are reported in the PR rather than allowlisted, and
+  # scanning only new commits means this gate prevents the next secret instead of
+  # relitigating fixtures forever.
+  secret-scan:
+    name: secret scan (new commits)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0  # gitleaks needs history to diff the PR range
+      - name: Install gitleaks (pinned + checksum-verified)
+        run: |
+          set -euo pipefail
+          ver=8.24.3
+          sha=9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c
+          curl -sSL -o gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz"
+          echo "${sha}  gitleaks.tgz" | sha256sum -c -
+          tar xzf gitleaks.tgz gitleaks
+      - name: Scan the commits this PR adds
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE:-}" ] && [ -n "${HEAD:-}" ]; then
+            echo "scanning ${BASE}..${HEAD}"
+            ./gitleaks git . --no-banner --redact -c .gitleaks.toml --log-opts="${BASE}..${HEAD}"
+          else
+            echo "not a pull_request event — scanning the most recent commit only"
+            ./gitleaks git . --no-banner --redact -c .gitleaks.toml --log-opts="-1"
+          fi
+
+  # ── the two-agent demo: what the README tells a stranger to run ───────────
+  #
+  # One script stands up two separately administered orgs and two agents,
+  # completes one delegated, co-signed A2A call, verifies the receipt and the
+  # co-signature with the JavaScript verifiers (a second implementation, keys
+  # from the agent cards), and drives four refusals: denial, tampering (two
+  # variants), expired authority, interrupted execution. The script asserts
+  # each outcome itself and exits non-zero on the first that does not hold, so
+  # this job is red by the step below whenever any one of the five is wrong.
+  # The evidence directory is uploaded so a red run can be read, not re-run.
+  two_agent_demo:
+    name: two-agent demo (delegated call, co-signed receipt, four refusals)
+    needs: changes
+    if: needs.changes.outputs.two_agent_demo == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DOCKER_BUILDKIT: 1
+      COMPOSE_DOCKER_CLI_BUILD: 1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/requirements.lock
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Install the agent runtime (the two agents run as host processes)
+        run: pip install -r agent/requirements.lock && pip install -e ./agent --no-deps
+      - name: Run the demo — happy path and all four refusals, asserted by the script
+        run: bash scripts/demo_two_agents.sh --evidence demo-evidence
+      - name: The demo left nothing behind (0 containers, 0 volumes of its own)
+        if: always()
+        run: |
+          set -euo pipefail
+          c=$(docker ps -a --format '{{.Names}}' | grep -c 'orrery-two-agent-demo' || true)
+          v=$(docker volume ls -q | grep -c 'orrery-two-agent-demo' || true)
+          echo "containers=$c volumes=$v"
+          [ "$c" = 0 ] && [ "$v" = 0 ] || { echo "::error::the demo did not tear down"; exit 1; }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: two-agent-demo-evidence
+          path: demo-evidence
+          if-no-files-found: ignore
+
+  gate:
+    name: ci gate
+    if: always()
+    needs:
+      - changes
+      - supply-chain-pins
+      - doc-guards
+      - index
+      - smb_host
+      - mcp_server
+      - skill
+      - agent
+      # Listed for the reason the smb_browser note below gives: the volume
+      # adoption probe is the only job that boots the agent image over a volume
+      # it did not write, and a check that does not gate would leave that case
+      # exactly as unenforced as it was before.
+      - agent_volume_adoption
+      - server
+      - renderer
+      - smb_funnel
+      - smb_signup
+      - conformance
+      - smb_e2e
+      # Listed here or the browser job is a check that does not gate — a red
+      # front door would leave `ci gate` green, which is the whole failure mode
+      # this repository keeps finding in its own instruments.
+      - smb_browser
+      - installer
+      - e2e
+      - two_agent_demo
+      - cve-scan
+      - secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded or was skipped
+        run: |
+          set -euo pipefail
+          results='${{ join(needs.*.result, ',') }}'
+          echo "dependency results: ${results}"
+          IFS=','
+          for r in $results; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::a required job did not pass (result=${r})"; exit 1 ;;
+            esac
+          done
+          echo "OK: all jobs succeeded or were skipped"

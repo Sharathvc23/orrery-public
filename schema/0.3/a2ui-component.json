@@ -1,0 +1,548 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanda.org/schema/0.3/a2ui-component.json",
+  "title": "A2UI v0.9 Component",
+  "description": "A single component in an A2UI v0.9 surface. The discriminator is the `component` field; per-type sub-schemas in `$defs` constrain the remaining properties. See spec/0.3/a2ui.md §3.",
+  "type": "object",
+  "required": ["id", "component"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "component": {
+      "type": "string",
+      "enum": [
+        "Text", "Heading", "Markdown", "CodeBlock",
+        "Card", "Column", "Row", "Grid", "Divider",
+        "Badge", "Progress", "Metric", "Stat", "List", "Avatar", "Image",
+        "Alert", "Link", "Tabs", "Table", "Accordion",
+        "Callout", "TrustBadge", "Timeline", "MemberCard", "StatGroup",
+        "Input", "TextArea", "Select", "Toggle",
+        "ActionButton", "Form", "Chip", "ChipGroup", "Toast"
+      ]
+    }
+  },
+
+  "allOf": [
+    { "if": { "properties": { "component": { "const": "Text" } } },         "then": { "$ref": "#/$defs/Text" } },
+    { "if": { "properties": { "component": { "const": "Heading" } } },      "then": { "$ref": "#/$defs/Heading" } },
+    { "if": { "properties": { "component": { "const": "Markdown" } } },     "then": { "$ref": "#/$defs/Markdown" } },
+    { "if": { "properties": { "component": { "const": "CodeBlock" } } },    "then": { "$ref": "#/$defs/CodeBlock" } },
+    { "if": { "properties": { "component": { "const": "Card" } } },         "then": { "$ref": "#/$defs/Card" } },
+    { "if": { "properties": { "component": { "const": "Column" } } },       "then": { "$ref": "#/$defs/Column" } },
+    { "if": { "properties": { "component": { "const": "Row" } } },          "then": { "$ref": "#/$defs/Row" } },
+    { "if": { "properties": { "component": { "const": "Grid" } } },         "then": { "$ref": "#/$defs/Grid" } },
+    { "if": { "properties": { "component": { "const": "Divider" } } },      "then": { "$ref": "#/$defs/Divider" } },
+    { "if": { "properties": { "component": { "const": "Badge" } } },        "then": { "$ref": "#/$defs/Badge" } },
+    { "if": { "properties": { "component": { "const": "Progress" } } },     "then": { "$ref": "#/$defs/Progress" } },
+    { "if": { "properties": { "component": { "const": "Metric" } } },       "then": { "$ref": "#/$defs/Metric" } },
+    { "if": { "properties": { "component": { "const": "Stat" } } },         "then": { "$ref": "#/$defs/Stat" } },
+    { "if": { "properties": { "component": { "const": "List" } } },         "then": { "$ref": "#/$defs/List" } },
+    { "if": { "properties": { "component": { "const": "Avatar" } } },       "then": { "$ref": "#/$defs/Avatar" } },
+    { "if": { "properties": { "component": { "const": "Image" } } },        "then": { "$ref": "#/$defs/Image" } },
+    { "if": { "properties": { "component": { "const": "Alert" } } },        "then": { "$ref": "#/$defs/Alert" } },
+    { "if": { "properties": { "component": { "const": "Link" } } },         "then": { "$ref": "#/$defs/Link" } },
+    { "if": { "properties": { "component": { "const": "Tabs" } } },         "then": { "$ref": "#/$defs/Tabs" } },
+    { "if": { "properties": { "component": { "const": "Table" } } },        "then": { "$ref": "#/$defs/Table" } },
+    { "if": { "properties": { "component": { "const": "Accordion" } } },    "then": { "$ref": "#/$defs/Accordion" } },
+    { "if": { "properties": { "component": { "const": "Callout" } } },      "then": { "$ref": "#/$defs/Callout" } },
+    { "if": { "properties": { "component": { "const": "TrustBadge" } } },   "then": { "$ref": "#/$defs/TrustBadge" } },
+    { "if": { "properties": { "component": { "const": "Timeline" } } },     "then": { "$ref": "#/$defs/Timeline" } },
+    { "if": { "properties": { "component": { "const": "MemberCard" } } },   "then": { "$ref": "#/$defs/MemberCard" } },
+    { "if": { "properties": { "component": { "const": "StatGroup" } } },    "then": { "$ref": "#/$defs/StatGroup" } },
+    { "if": { "properties": { "component": { "const": "Input" } } },        "then": { "$ref": "#/$defs/Input" } },
+    { "if": { "properties": { "component": { "const": "TextArea" } } },     "then": { "$ref": "#/$defs/TextArea" } },
+    { "if": { "properties": { "component": { "const": "Select" } } },       "then": { "$ref": "#/$defs/Select" } },
+    { "if": { "properties": { "component": { "const": "Toggle" } } },       "then": { "$ref": "#/$defs/Toggle" } },
+    { "if": { "properties": { "component": { "const": "ActionButton" } } }, "then": { "$ref": "#/$defs/ActionButton" } },
+    { "if": { "properties": { "component": { "const": "Form" } } },         "then": { "$ref": "#/$defs/Form" } },
+    { "if": { "properties": { "component": { "const": "Chip" } } },         "then": { "$ref": "#/$defs/Chip" } },
+    { "if": { "properties": { "component": { "const": "ChipGroup" } } },    "then": { "$ref": "#/$defs/ChipGroup" } },
+    { "if": { "properties": { "component": { "const": "Toast" } } },        "then": { "$ref": "#/$defs/Toast" } }
+  ],
+
+  "$defs": {
+    "idRef": { "type": "string", "minLength": 1 },
+    "childrenArray": {
+      "description": "Either a bare array of id-refs (v0.9) or {explicitList:[...]} (v0.8 back-compat).",
+      "oneOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/idRef" } },
+        {
+          "type": "object",
+          "required": ["explicitList"],
+          "additionalProperties": false,
+          "properties": {
+            "explicitList": { "type": "array", "items": { "$ref": "#/$defs/idRef" } }
+          }
+        }
+      ]
+    },
+
+    "Text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Text" },
+        "text": { "type": "string" },
+        "usageHint": { "enum": ["h1", "h2", "h3", "h4", "body", "caption"] }
+      }
+    },
+    "Heading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "text", "level"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Heading" },
+        "text": { "type": "string" },
+        "level": { "type": "integer", "minimum": 1, "maximum": 6 }
+      }
+    },
+    "Markdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Markdown" },
+        "text": { "type": "string" }
+      }
+    },
+    "CodeBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "code"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "CodeBlock" },
+        "code": { "type": "string" },
+        "language": { "type": "string" }
+      }
+    },
+    "Card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "child"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Card" },
+        "child": { "$ref": "#/$defs/idRef" }
+      }
+    },
+    "Column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "children"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Column" },
+        "children": { "$ref": "#/$defs/childrenArray" }
+      }
+    },
+    "Row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "children"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Row" },
+        "children": { "$ref": "#/$defs/childrenArray" }
+      }
+    },
+    "Grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "children"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Grid" },
+        "children": { "$ref": "#/$defs/childrenArray" },
+        "cols": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "Divider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Divider" },
+        "axis": { "enum": ["horizontal", "vertical"] }
+      }
+    },
+    "Badge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Badge" },
+        "text": { "type": "string" },
+        "variant": { "enum": ["default", "secondary", "destructive", "outline"] },
+        "color": { "type": "string" }
+      }
+    },
+    "Progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "value"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Progress" },
+        "value": { "type": "number", "minimum": 0, "maximum": 100 },
+        "label": { "type": "string" },
+        "color": { "enum": ["default", "green", "yellow", "red"] }
+      }
+    },
+    "Metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "value", "label"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Metric" },
+        "value": { "type": "string" },
+        "label": { "type": "string" },
+        "suffix": { "type": "string" },
+        "trend": { "enum": ["up", "down", "neutral"] }
+      }
+    },
+    "Stat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "label", "value"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Stat" },
+        "label": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "List": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "items"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "List" },
+        "items": { "type": "array", "items": { "type": "string" } },
+        "ordered": { "type": "boolean" }
+      }
+    },
+    "Avatar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Avatar" },
+        "name": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "subtitle": { "type": "string" }
+      }
+    },
+    "Image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "url"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Image" },
+        "url": { "type": "string" },
+        "alt": { "type": "string" },
+        "width": { "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Alert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "message"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Alert" },
+        "message": { "type": "string" },
+        "title": { "type": "string" },
+        "variant": { "enum": ["default", "success", "warning", "error"] }
+      }
+    },
+    "Link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "text", "url"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Link" },
+        "text": { "type": "string" },
+        "url": { "type": "string" }
+      }
+    },
+    "Tabs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "tabs"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Tabs" },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "child"],
+            "properties": {
+              "label": { "type": "string" },
+              "child": { "$ref": "#/$defs/idRef" }
+            }
+          }
+        }
+      }
+    },
+    "Table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "headers", "rows"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Table" },
+        "headers": { "type": "array", "items": { "type": "string" } },
+        "rows": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "string" } }
+        },
+        "caption": { "type": "string" }
+      }
+    },
+    "Accordion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "items"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Accordion" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "content"],
+            "properties": {
+              "title": { "type": "string" },
+              "content": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "Callout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Callout" },
+        "text": { "type": "string" },
+        "title": { "type": "string" },
+        "variant": { "enum": ["info", "success", "warning", "danger"] }
+      }
+    },
+    "TrustBadge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "score"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "TrustBadge" },
+        "score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "tier": { "enum": ["newcomer", "member", "established", "leader", "core"] }
+      }
+    },
+    "Timeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "entries"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Timeline" },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title"],
+            "properties": {
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "timestamp": { "type": "string" },
+              "variant": { "enum": ["default", "success", "warning", "error"] }
+            }
+          }
+        }
+      }
+    },
+    "MemberCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "MemberCard" },
+        "name": { "type": "string" },
+        "agentId": { "type": "string" },
+        "subtitle": { "type": ["string", "null"] },
+        "bio": { "type": ["string", "null"] },
+        "avatarUrl": { "type": ["string", "null"] },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "role": { "type": "string" },
+        "trustScore": { "type": ["number", "null"], "minimum": 0, "maximum": 100 }
+      }
+    },
+    "StatGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "items"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "StatGroup" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string" },
+              "value": { "type": "string" },
+              "suffix": { "type": "string" },
+              "trend": { "enum": ["up", "down", "neutral"] }
+            }
+          }
+        }
+      }
+    },
+    "Input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Input" },
+        "label": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "value": { "type": "string" },
+        "inputType": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "TextArea": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "TextArea" },
+        "label": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "value": { "type": "string" },
+        "rows": { "type": "integer", "minimum": 1 },
+        "name": { "type": "string" }
+      }
+    },
+    "Select": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "options"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Select" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string" },
+              "value": { "type": "string" }
+            }
+          }
+        },
+        "label": { "type": "string" },
+        "value": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "Toggle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Toggle" },
+        "label": { "type": "string" },
+        "checked": { "type": "boolean" },
+        "name": { "type": "string" }
+      }
+    },
+    "ActionButton": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "label", "action"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "ActionButton" },
+        "label": { "type": "string" },
+        "action": { "type": "string" },
+        "variant": { "enum": ["default", "secondary", "outline", "destructive", "ghost", "link"] },
+        "data": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "Form": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "children", "action"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Form" },
+        "children": { "$ref": "#/$defs/childrenArray" },
+        "action": { "type": "string" },
+        "submitLabel": { "type": "string" }
+      }
+    },
+    "Chip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "label"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Chip" },
+        "label": { "type": "string" },
+        "value": { "type": "string" },
+        "selected": { "type": "boolean" }
+      }
+    },
+    "ChipGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "children"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "ChipGroup" },
+        "children": { "$ref": "#/$defs/childrenArray" },
+        "multi": { "type": "boolean" }
+      }
+    },
+    "Toast": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "component", "message"],
+      "properties": {
+        "id": { "type": "string" },
+        "component": { "const": "Toast" },
+        "message": { "type": "string" },
+        "title": { "type": "string" },
+        "variant": { "enum": ["default", "success", "warning", "error"] }
+      }
+    }
+  }
+}

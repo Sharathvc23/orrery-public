@@ -1,0 +1,55 @@
+# The published federation profile. This is what conformance/federation/
+# validates Orrery against — resolved from the installed distribution via
+# `sm_federation.wire`, never transcribed into this repo.
+#
+# 0.5.0 is REQUIRED, not merely current: through 0.4.2 `read_intelligence` did
+# not forward `expected_head` to `verify_page`, so the §4 reference seam could
+# not detect a restarted sequence at all — a reseeded feed returned `ok`. The
+# assertions in test_feed_completeness.py verify through that seam, so on 0.4.2
+# `test_the_reference_verifier_detects_a_reseed` fails, correctly. Fixed in
+# the sm-federation protocol notes.
+#
+# 0.3.0 was the first release that carried a contract at all — the 0.2.0 wheel
+# contained four .py files and no schemas. 0.4.0 added §2.1 (`capabilities`
+# section tokens, with `federation/<v>#4` bound to `feed_url` both ways). 0.4.1
+# repaired over-determined rejection vectors. 0.4.2 closes the rest of the
+# corpus and asserts full coverage upstream, so a constraint no vector exercises
+# now fails at the commit that introduces it rather than at somebody's pin bump.
+#
+# Checked against the published artifact rather than the repo or pyproject: the
+# 0.4.2 wheel is 16 files, six JSON, with 34 envelope and 22 descriptor rejection
+# vectors, and the node-descriptor schema carries the `allOf` — so a non-Python
+# consumer gets the cross-field rule too.
+#
+# INSTALL NOTE, now observed on three consecutive releases and reversing each
+# time: `/simple/` and the per-version JSON cache INDEPENDENTLY, and so does
+# pip's own resolution. 0.3.0 — `/simple/` current, summary JSON stale. 0.4.0 —
+# both current, pip still failed once and succeeded on retry. 0.4.1 and 0.4.2 —
+# per-version JSON current, `/simple/` empty, so `pip install` could not resolve
+# at all. The only ground truth is the per-version endpoint plus downloading the
+# artifact; a single failed install is not evidence of a failed publish.
+#
+# WHY A VERSION AND NOT A VCS PIN: tried, and it fails in CI. The sm-federation
+# *package* is public on PyPI but the *repository* is private, so an anonymous
+# VCS-URL clone from an Actions runner gets "could not read Username for
+# 'https://github.com'" (observed: run 31273021220, job 93142083287). Making it
+# work needs a clone-token secret on this repo — a standing cross-repo credential
+# held in order to watch a public artifact, which is worse than the drift it
+# would detect.
+#
+# WHY NOT VENDOR A COPY: that is the failure this whole suite exists to prevent.
+# A conformance suite that validates against its own copy of a contract proves
+# only that it agrees with itself.
+#
+# BUMPING THIS PIN is how an upstream change reaches Orrery — a normal reviewable
+# dependency bump on which every assertion in conformance/federation/ re-runs.
+# There is deliberately no scheduled cross-repo canary; the README says why.
+#
+# A bump also re-measures how much of the published schema the published
+# rejection corpus actually guards, and asserts the figure
+# (test_corpus_coverage.py). Expect that test to fail on a bump and to need a
+# deliberate update — that is the point of it, not a nuisance.
+sm-federation==0.6.0
+
+# Draft 2020-12 validation of live surfaces against the published schemas.
+jsonschema>=4.21

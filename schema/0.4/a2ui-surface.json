@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanda.org/schema/0.4/a2ui-surface.json",
+  "title": "A2UI v0.10 Surface Envelope",
+  "description": "Top-level envelope returned by GET /api/surfaces/{page_id} on a v0.4 chapter when ?schema=v0.9 / ?schema=v0.8 is NOT requested. Wire-compatible with v0.9 plus an optional `meta` block on each component (see spec/0.4/a2ui.md \u00a710). See spec/0.4/a2ui.md \u00a71.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "createSurface",
+    "updateComponents",
+    "version"
+  ],
+  "properties": {
+    "createSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surfaceId"
+      ],
+      "properties": {
+        "surfaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "meta": {
+          "$ref": "#/$defs/SurfaceMeta"
+        }
+      }
+    },
+    "updateComponents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surfaceId",
+        "root",
+        "components"
+      ],
+      "properties": {
+        "surfaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "a2ui-component.json"
+          }
+        }
+      }
+    },
+    "version": {
+      "const": "0.10"
+    }
+  },
+  "$defs": {
+    "SurfaceMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional v0.10 surface-level metadata. PR-C4 reserves two namespaces (density, target) plus a vendor-extension escape. Component-level meta.density (when present) overrides surface-level density for that component.",
+      "patternProperties": {
+        "^x-[a-z][a-z0-9-]*$": {
+          "type": "object"
+        }
+      },
+      "properties": {
+        "density": {
+          "$ref": "#/$defs/SurfaceDensity"
+        },
+        "target": {
+          "$ref": "#/$defs/SurfaceTarget"
+        }
+      }
+    },
+    "SurfaceDensity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Surface-level default density. Components without their own meta.density inherit this.",
+      "properties": {
+        "preferred": {
+          "enum": [
+            "compact",
+            "comfortable",
+            "spacious"
+          ],
+          "description": "Default density for every component on the surface."
+        }
+      }
+    },
+    "SurfaceTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Target form factor hint. Renderers MAY use this to bias layout decisions (e.g. tighter density on mobile).",
+      "properties": {
+        "formFactor": {
+          "enum": [
+            "mobile",
+            "tablet",
+            "desktop"
+          ],
+          "description": "Target form factor the chapter is optimising the surface for."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,68 @@
+# gitleaks configuration — narrow allowlisting only.
+#
+# WHY THIS FILE EXISTS. The `secret scan` CI job flagged 55 "leaks" in
+# vectors/rotation/v06/peer-rotation-cases.json. Every one was a `z6Mk…`
+# did:key — the Ed25519 MULTICODEC PUBLIC key — or a base64 signature over
+# public fields. Public by construction: a conformance corpus that proves two
+# runtimes agree on a wire format contains nothing else.
+#
+# ⚠️ THE FIX IS BY SHAPE, NOT BY PATH, AND THAT IS THE WHOLE POINT.
+# A blanket `paths = vectors/` exclusion would mean a genuinely private key
+# committed into a vectors file never fires — and vectors are exactly where a
+# test seed would be pasted "just for a fixture". So the allowlist below matches
+# the STRINGS that are provably public, wherever they appear, and leaves every
+# other rule and every other shape live in those same files.
+#
+# A secret scanner that cries wolf on every conformance-vector PR is one people
+# learn to bypass with --admin. That is not hypothetical here: it is how a red
+# gate got merged. Tuning it precisely is what keeps it worth obeying.
+
+[extend]
+useDefault = true
+
+[[rules]]
+# Keep the broad entropy rule active everywhere; only carve out the two shapes.
+id = "generic-api-key"
+[rules.allowlist]
+regexTarget = "match"
+regexes = [
+  # did:key Ed25519 PUBLIC keys. `z` is multibase base58btc and `6Mk` is the
+  # 0xed01 Ed25519-PUBLIC multicodec prefix — a did:key for a PRIVATE key would
+  # not carry this prefix, so this cannot mask one.
+  '''did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,50}''',
+  # Bare z6Mk… identifiers as they appear in JSON values without the did:key
+  # scheme (the vectors carry both forms).
+  '''\bz6Mk[1-9A-HJ-NP-Za-km-z]{40,50}\b''',
+  # Ed25519 signatures: exactly 64 bytes → 88 base64 chars ending in `==`.
+  # Length-anchored on purpose. A 32-byte seed base64-encodes to 44 chars and
+  # will NOT match this, so a leaked private seed still fires.
+  '''\b[A-Za-z0-9+/]{86}==''',
+  # An attribute ASSIGNMENT FROM AN IDENTIFIER, not a literal:
+  #     config.private_key = material.private_key_b64
+  # The rule's secret group accepts `[\w.=-]{10,150}`, so a dotted Python name
+  # on the right-hand side matches as if it were a token. This shape carries
+  # no material: the value is another attribute read at runtime. Anchored so a
+  # LITERAL on the same line still fires — the right-hand side must be an
+  # identifier path ending in `private_key_b64` (`material.private_key_b64`,
+  # or the bare local `private_key_b64` in auth.py / portable.py), with no
+  # quotes and no base64/hex body anywhere in the match. Found by the
+  # full-history scan in 24 historical blobs of smb_host/main.py and
+  # agent/community_member/wizard.py; the working-tree scan shows the bare form.
+  '''private_key\s*=\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)*private_key_b64\b''',
+]
+
+[allowlist]
+description = "Nothing is globally allowlisted. Additions here must be justified in review."
+
+# ── VERIFIED, and the limits stated rather than implied ────────────────────
+# Checked by planting real material in vectors/rotation/v06/ and scanning:
+#   PEM private key block ....... FIRES (gitleaks `private-key` rule)   ✅
+#   raw 44-char base64 seed ..... not detected
+#   low-entropy `sk_live_aaa…` .. not detected
+# The last two are NOT caused by this file: baseline gitleaks with no config
+# misses them identically (checked both ways). They are limits of the tool —
+# no rule matches a bare 32-byte seed, and the entropy threshold rejects a
+# repetitive token. Recorded so nobody reads a green secret-scan as proof that
+# no key of any shape can reach the tree; the length-anchoring on the signature
+# regex above is what keeps a 44-char seed from being masked by this config on
+# top of that.

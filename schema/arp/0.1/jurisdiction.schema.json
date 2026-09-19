@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarminds.ai/schemas/sm-arp/0.1/jurisdiction.schema.json",
+  "title": "ARP Jurisdiction",
+  "description": "Legal and regulatory context applicable to the action. See spec.md §8.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "principal_residence": { "$ref": "common.schema.json#/$defs/iso3166Code" },
+    "action_locus":         { "$ref": "common.schema.json#/$defs/iso3166Code" },
+    "data_residency": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/iso3166Code" },
+      "uniqueItems": true
+    },
+    "applicable_regimes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32,
+        "description": "Identifier of a regulatory regime. Open enumeration — examples: gdpr, ccpa, hipaa, pci-dss, eu-ai-act, coppa, lgpd, pipl."
+      },
+      "uniqueItems": true
+    },
+    "consent_evidence_hash": { "$ref": "common.schema.json#/$defs/sha256Hash" }
+  }
+}

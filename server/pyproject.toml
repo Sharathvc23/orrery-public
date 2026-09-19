@@ -1,0 +1,87 @@
+[project]
+name = "orrery-server"
+version = "0.2.0"
+description = "The host that runs an org of accountable AI agents and emits signed receipts."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sharath Chandra", email = "sharath@komputix.com" }]
+keywords = ["agents", "org", "arp", "accountability", "federation"]
+# The server is a flat-module application (run via uvicorn), not a library — modules
+# import each other flat (`import governance`), so tests put the server root on the path.
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "httpx>=0.24.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "sse-starlette>=1.6.0",
+    "pynacl>=1.5.0",
+    "base58>=2.1.1",
+    "rich>=13.0.0",
+    "jcs>=0.2.1",
+    "cryptography>=42.0.0",
+    "jsonschema>=4.20.0",
+    "referencing>=0.30.0",
+    "sm-arp>=0.3.0",
+    "sm-locp>=0.2.1",
+    "sm-bridge>=0.4.1",
+    # 0.2.0 is the honest floor: build_node_descriptor gained `feed_url` in 0.2,
+    # and routes/identity passes it (empty — see the handler's comment). A 0.1.0
+    # install would TypeError on that keyword at import of the first request.
+    "sm-federation>=0.6.0",
+    "sm-listing>=0.3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.15"]
+
+[project.urls]
+Homepage = "https://github.com/Sharathvc23/orrery"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = [".", ".."]  # server root + repo root (for the shared `conformance` package)
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+# Correctness-focused gate matching the sm-* family (E/F pycodestyle+pyflakes,
+# I import-sort, UP pyupgrade). The opinionated refactor families (B/SIM/RUF),
+# E501 line-length reflow across the existing app, and a whole-app mypy sweep
+# are a follow-up tightening.
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]  # line-length: enforced by formatter follow-up, not this gate
+
+[tool.ruff.lint.per-file-ignores]
+# chapter_agent.py is a flat-module app entrypoint: it sets env + resolves a few
+# deferred imports after module-level setup (avoid import cycles / lazy optional
+# deps), so E402 (import-not-at-top) is intentional there.
+"chapter_agent.py" = ["E402"]
+
+# Coverage (R1): measure the app, not the test files or the vendored
+# byte-mirror (_arp_verify is drift-guarded against upstream, not unit-tested
+# here). Floors are enforced in CI: --cov-fail-under (global) +
+# scripts/coverage_gate.py (per-module, security-critical set).
+[tool.coverage.run]
+omit = ["tests/*", "_arp_verify/*"]
+
+# mypy (R2): scoped to the security-critical auth/crypto modules — the
+# whole-app sweep over the flat-module server stays the follow-up. Mirrors the
+# agent's config (pydantic plugin teaches mypy the Nanda* model defaults).
+[tool.mypy]
+# 3.12 = the actual runtime target (infra/Dockerfile.server + CI); the code
+# already uses 3.11+ stdlib (datetime.UTC), so 3.10 would be a false claim.
+# Scope: the WHOLE server app — tests, one-off scripts, and the
+# vendored _arp_verify byte-mirror stay out (the mirror is drift-guarded
+# against upstream, never edited here).
+python_version = "3.12"
+ignore_missing_imports = true
+follow_imports = "silent"
+plugins = ["pydantic.mypy"]
+files = ["."]
+exclude = ["^tests/", "^scripts/", "^_arp_verify/"]

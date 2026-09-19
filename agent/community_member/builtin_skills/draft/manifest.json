@@ -1,0 +1,7 @@
+{
+  "name": "draft",
+  "version": "1.0.0",
+  "description": "Draft a short message or email from an intent, using the agent's LLM.",
+  "capabilities": [],
+  "builtin": true
+}

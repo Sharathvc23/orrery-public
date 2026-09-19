@@ -1,0 +1,45 @@
+{
+  "action": {
+    "amount": {
+      "cents": 3000,
+      "currency": "USD"
+    },
+    "category": "purchase",
+    "counterparty_label": "domain:amctheatres.com",
+    "human_summary": "2 tickets",
+    "jurisdiction": "US-MA",
+    "outcome": "completed"
+  },
+  "agent_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+  "expect": [
+    "VIOLATED",
+    "initial_bind_authorizes_nothing"
+  ],
+  "grant": {
+    "authorization_ceremony": null,
+    "delegation": {
+      "max_depth": 4,
+      "parent_grant_id": null
+    },
+    "grant_id": "dat:did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX:b23f77b6c19d89d9",
+    "grantee_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+    "grantor_did": "did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX",
+    "human_summary": "Initial bind: principal\u2194agent; authorizes nothing.",
+    "initial_bind": true,
+    "issued_at": "2026-01-01T00:00:00Z",
+    "not_after": "2026-12-31T23:59:59Z",
+    "not_before": "2026-01-01T00:00:00Z",
+    "revocation": null,
+    "scope": {
+      "action_categories": [],
+      "predicate": null,
+      "stateful": {},
+      "stateless": {}
+    },
+    "signature": "vgQqRzWb9qY0ES+YXF/HQpJgiiuu6RxzOh6x+9Cx3mcPsue3VbSoA4JRggSg6I8cBi1TQQKjTXX88d+2FsckBw==",
+    "version": "dat/0.1"
+  },
+  "issued_at": "2026-04-10T19:00:00Z",
+  "kind": "grant",
+  "name": "initial_bind_authorizes_nothing"
+}

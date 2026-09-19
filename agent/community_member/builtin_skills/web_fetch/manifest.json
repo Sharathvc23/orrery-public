@@ -1,0 +1,7 @@
+{
+  "name": "web-fetch",
+  "version": "1.0.0",
+  "description": "Fetch a single HTTP(S) URL and return its text content.",
+  "capabilities": ["net.http"],
+  "builtin": true
+}

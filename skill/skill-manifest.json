@@ -1,0 +1,42 @@
+{
+  "name": "orrery-org",
+  "version": "0.7.0",
+  "description": "Orrery org skill — register an OpenClaw agent with an org by URL, submit signed intents, respond to calls, render org dashboards, and subscribe to the org event bus.",
+  "author_did": "did:web:labs.stellarminds.ai",
+  "capabilities": [
+    "net.http",
+    "crypto.ed25519",
+    "fs.read",
+    "fs.write"
+  ],
+  "category": "agent-org",
+  "use_cases": [
+    "Join a self-hosted Orrery org by URL and obtain a persistent Ed25519 identity",
+    "Submit signed private intents for matching against other members",
+    "Respond to signed calls from other members",
+    "Render the org dashboard and subscribe to the org event bus"
+  ],
+  "required_tools": [],
+  "permissions": {
+    "network": true,
+    "filesystem": true,
+    "code_execution": false,
+    "external_api": true,
+    "user_data_access": true
+  },
+  "safety_level": "medium",
+  "risk_tags": [
+    "network-egress"
+  ],
+  "compatibility": {
+    "nanda_agentfacts": "supported",
+    "generic_agents": "experimental",
+    "mcp": "unknown",
+    "claude_skills": "unknown",
+    "chatgpt_skills": "unknown"
+  },
+  "license": "MIT",
+  "maintainers": [
+    { "name": "Sharath Chandra", "contact": "https://labs.stellarminds.ai" }
+  ]
+}

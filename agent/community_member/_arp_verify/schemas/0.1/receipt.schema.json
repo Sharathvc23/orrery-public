@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarminds.ai/schemas/sm-arp/0.1/receipt.schema.json",
+  "title": "ARP Receipt (v0.1)",
+  "description": "Top-level Receipt envelope for ARP v0.1. See spec.md §3.",
+  "type": "object",
+  "required": [
+    "version",
+    "receipt_id",
+    "issuer_did",
+    "principal_did",
+    "issued_at",
+    "action",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "arp/0.1",
+      "description": "MUST equal 'arp/0.1' for v0.1 receipts."
+    },
+    "receipt_id":    { "$ref": "common.schema.json#/$defs/uuidv4" },
+    "issuer_did":    { "$ref": "common.schema.json#/$defs/didKey" },
+    "principal_did": { "$ref": "common.schema.json#/$defs/didKey" },
+    "issued_at":     { "$ref": "common.schema.json#/$defs/rfc3339UtcTimestamp" },
+    "action":        { "$ref": "action.schema.json" },
+    "signature":     { "$ref": "common.schema.json#/$defs/base64Ed25519Signature" },
+
+    "authority_chain": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "DID or DAT envelope identifier (e.g., 'did:key:z6Mk...' or 'dat:did:key:z6Mki...:grant-uuid')."
+      }
+    },
+    "evidence":      { "$ref": "evidence.schema.json" },
+    "previous_receipt_hash": { "$ref": "common.schema.json#/$defs/sha256Hash" },
+    "jurisdiction":  { "$ref": "jurisdiction.schema.json" },
+    "accessibility": { "$ref": "accessibility.schema.json" },
+    "extensions":    { "$ref": "common.schema.json#/$defs/extensionsObject" }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "createSurface": { "surfaceId": "hostile-fixture" },
+  "updateComponents": {
+    "surfaceId": "hostile-fixture",
+    "root": "root",
+    "components": [
+      { "id": "root", "component": "Column", "children": [
+        "txt-script", "txt-img-onerror", "heading-svg", "md-html", "md-badlink",
+        "link-js", "link-data", "link-tab", "img-js", "img-datahtml", "avatar-js",
+        "badge-classbreak", "text-hintbreak", "table-cells", "list-items",
+        "code-script", "callout-html", "button-hostile", "form-hostile", "input-hostile",
+        "unknown-comp", "dangling-parent", "cycle-a", "deep-0", "member-hostile"
+      ] },
+
+      { "id": "txt-script", "component": "Text", "text": "<script>window.__pwned=1</script>", "usageHint": "body" },
+      { "id": "txt-img-onerror", "component": "Text", "text": "<img src=x onerror=\"window.__pwned=2\">", "usageHint": "h1" },
+      { "id": "heading-svg", "component": "Heading", "level": 2, "text": "<svg onload=window.__pwned=3>" },
+      { "id": "md-html", "component": "Markdown", "text": "# hi\n\n<iframe src=\"https://evil.example\"></iframe>\n\n- <script>window.__pwned=4</script>\n\n**bold** and `code`" },
+      { "id": "md-badlink", "component": "Markdown", "text": "[click me](javascript:window.__pwned=5) and [ok](https://example.com/x)" },
+
+      { "id": "link-js", "component": "Link", "text": "innocent link", "url": "javascript:window.__pwned=6" },
+      { "id": "link-data", "component": "Link", "text": "data link", "url": "data:text/html,<script>window.__pwned=7</script>" },
+      { "id": "link-tab", "component": "Link", "text": "tab link", "url": "java\tscript:window.__pwned=8" },
+      { "id": "img-js", "component": "Image", "url": "javascript:window.__pwned=9", "alt": "x" },
+      { "id": "img-datahtml", "component": "Image", "url": "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==", "alt": "y" },
+      { "id": "avatar-js", "component": "Avatar", "name": "Mallory <script>1</script>", "subtitle": "s", "imageUrl": "vbscript:msgbox(1)" },
+
+      { "id": "badge-classbreak", "component": "Badge", "text": "b", "variant": "danger\" onmouseover=\"window.__pwned=10" },
+      { "id": "text-hintbreak", "component": "Text", "text": "t", "usageHint": "body\"><script>window.__pwned=11</script>" },
+      { "id": "table-cells", "component": "Table", "headers": ["<th onclick=window.__pwned=12>"], "rows": [["<td><script>window.__pwned=13</script></td>", "'; DROP TABLE agents;--"]], "caption": "<caption onload=x>" },
+      { "id": "list-items", "component": "List", "items": ["<li onmouseover=window.__pwned=14>", "</ul><script>window.__pwned=15</script>"], "ordered": false },
+      { "id": "code-script", "component": "CodeBlock", "code": "</code></pre><script>window.__pwned=16</script>", "language": "js\"><img src=x onerror=1>" },
+      { "id": "callout-html", "component": "Callout", "text": "<b onclick=window.__pwned=17>x</b>", "variant": "info", "title": "<script>t</script>" },
+
+      { "id": "button-hostile", "component": "ActionButton", "label": "<script>window.__pwned=18</script>", "action": "submit_intent\u0000<script>", "variant": "primary", "data": { "__proto__": { "polluted": true }, "k": "v" } },
+      { "id": "form-hostile", "component": "Form", "children": ["input-hostile"], "action": "a", "submitLabel": "<svg/onload=window.__pwned=19>" },
+      { "id": "input-hostile", "component": "Input", "label": "l", "placeholder": "\"><script>window.__pwned=20</script>", "value": "\" autofocus onfocus=\"window.__pwned=21", "inputType": "text\" onfocus=\"window.__pwned=22" },
+
+      { "id": "unknown-comp", "component": "WebView", "url": "https://evil.example", "html": "<script>window.__pwned=23</script>" },
+      { "id": "dangling-parent", "component": "Card", "child": "does-not-exist" },
+      { "id": "cycle-a", "component": "Column", "children": ["cycle-b"] },
+      { "id": "cycle-b", "component": "Column", "children": ["cycle-a", "txt-script"] },
+      { "id": "member-hostile", "component": "MemberCard", "name": "<script>n</script>", "agentId": "evil\"><script>window.__pwned=24</script>", "avatarUrl": "javascript:1", "role": "<b>r</b>", "skills": ["<script>s</script>"], "subtitle": "sub" },
+
+      { "id": "deep-0", "component": "Column", "children": ["deep-1"] },
+      { "id": "deep-1", "component": "Column", "children": ["deep-2"] },
+      { "id": "deep-2", "component": "Column", "children": ["deep-3"] },
+      { "id": "deep-3", "component": "Column", "children": ["deep-4"] },
+      { "id": "deep-4", "component": "Text", "text": "bottom", "usageHint": "body" },
+
+      { "id": "txt-script", "component": "Text", "text": "duplicate id should be ignored", "usageHint": "body" },
+      { "id": "__proto__", "component": "Text", "text": "prototype-plumbing id must be dropped" },
+      { "component": "Text", "text": "missing id must be dropped" },
+      "not-an-object-entry"
+    ]
+  },
+  "version": "0.9"
+}

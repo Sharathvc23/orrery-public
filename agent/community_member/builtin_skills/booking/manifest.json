@@ -1,0 +1,7 @@
+{
+  "name": "booking",
+  "version": "1.0.0",
+  "description": "Book an appointment with a service provider and emit a signed ARP receipt for it.",
+  "capabilities": [],
+  "builtin": true
+}

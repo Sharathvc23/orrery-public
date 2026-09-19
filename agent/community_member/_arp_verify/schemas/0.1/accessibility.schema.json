@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarminds.ai/schemas/sm-arp/0.1/accessibility.schema.json",
+  "title": "ARP Accessibility",
+  "description": "Annotations for accessibility tooling (screen readers, translation, summarization). See spec.md §9.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary_language": { "$ref": "common.schema.json#/$defs/bcp47LanguageTag" },
+    "alt_summaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["lang", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "lang":    { "$ref": "common.schema.json#/$defs/bcp47LanguageTag" },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 280
+          }
+        }
+      }
+    },
+    "screen_reader_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "aria_label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 280
+        },
+        "pronunciation": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["routine", "notable", "urgent"]
+        }
+      }
+    },
+    "complexity_level": {
+      "type": "string",
+      "enum": ["simple", "moderate", "complex"]
+    },
+    "requires_review": { "type": "boolean" }
+  }
+}

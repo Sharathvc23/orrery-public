@@ -1,0 +1,71 @@
+# Headless community-member agent image for container/PaaS deploys.
+#
+# Build context = the agent/ dir (so the package + serve.py are both present):
+#   docker build -f agent/infra/Dockerfile.agent -t orrery-agent agent/
+#
+# Runs serve.py (NOT run_agent.py — that binds 127.0.0.1 and doesn't announce).
+# Identity is STABLE across redeploys via the passphrase keystore + a persistent
+# COMMUNITY_MEMBER_HOME volume — see the serve.py header for the hard requirement.
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+
+# curl: the healthcheck. (git no longer needed — every agent dependency is an
+# exact-pinned PyPI release now; see constraints.txt / R3, issue.)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+
+# The agent package + real Ed25519 (pynacl) — required for a verifiable did:key
+# and headless signing (the HMAC fallback can't produce a real verify-key).
+# requirements.lock is the fully-resolved set (includes the ed25519
+# extra's deps); the package itself installs on top without re-resolving.
+RUN pip install --no-cache-dir -r requirements.lock && pip install --no-cache-dir --no-deps ".[ed25519]"
+
+# The host injects PORT (Railway/Render/Fly/…); this is the local default.
+# serve.py binds 0.0.0.0:$PORT.
+ENV PORT=8080
+# Persist identity across redeploys — MOUNT A PERSISTENT VOLUME HERE. Without it
+# the keystore vault is lost on every redeploy and the did:key re-mints (orphaning
+# the org/NEST/host39 registrations).
+ENV COMMUNITY_MEMBER_HOME=/data/.community-member
+# Headless keystore: a passphrase-encrypted vault unlocked from
+# COMMUNITY_MEMBER_PASSPHRASE — never the machine-id device key (ephemeral in
+# containers). If the passphrase is unset the agent fails LOUD at startup rather
+# than silently minting a throwaway identity.
+ENV COMMUNITY_MEMBER_KEYSTORE=passphrase
+
+EXPOSE 8080
+HEALTHCHECK --interval=15s --timeout=5s --retries=20 \
+  CMD curl -fsS "http://localhost:${PORT:-8080}/agentfacts.json" || exit 1
+
+# C14: non-root. The agent process runs as uid 10001.
+#
+# /app is image content, so owning it at build time is correct and final.
+#
+# /data IS NOT. A previous version chowned it here with a comment saying a
+# mounted volume would "inherit the right uid" — it does not. At build time
+# /data is an empty directory in the image; at runtime the platform mounts a
+# volume over it carrying the ownership of whatever wrote it. Agents shipped
+# before this image ran as root and left keystore.enc as root:root mode 0600,
+# which uid 10001 cannot read, so the container crashed on boot. The adoption
+# has to happen after the mount and before privileges drop, which is what the
+# entrypoint does.
+#
+# There is no USER instruction. Dropping here would leave the entrypoint unable
+# to adopt the volume; it starts as root, adopts COMMUNITY_MEMBER_HOME, and
+# execs the agent as orrery via setpriv, so no privileged process survives it.
+# /home/orrery is created and owned here. useradd --no-create-home left the
+# passwd entry pointing at a directory that did not exist, so anything resolving
+# "~" had nowhere writable to go.
+RUN groupadd --gid 10001 orrery \
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin orrery \
+  && mkdir -p /data /home/orrery \
+  && chown -R orrery:orrery /app /home/orrery
+
+COPY infra/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/agent-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]
+CMD ["python", "serve.py"]

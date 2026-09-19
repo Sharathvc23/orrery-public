@@ -1,0 +1,7 @@
+{
+  "id": "service",
+  "name": "Service org pack",
+  "description": "Service-business verbs that write through your org rather than to a local file: keep CRM contacts, deals and interaction history, with a signed receipt for every change.",
+  "default_installed": false,
+  "skills": ["crm"]
+}

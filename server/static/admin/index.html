@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Org Admin</title>
+  <style>
+    /*
+      Self-contained: this page loaded a stylesheet from a public CDN, which its
+      own Content-Security-Policy (style-src 'self' plus a hash of this block)
+      does not permit, so the rules never applied and the custom properties the
+      rules below reference were undefined. The palette is defined here and
+      matches the other served pages (console, join, receipts).
+    */
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d12;
+      --fg: #e6e8ee;
+      --muted: #8b90a0;
+      --muted-border: #1c212c;
+      --panel: #0e1118;
+      --accent: #7aa2f7;
+      --cyan: #06b6d4;
+      --ok: #4ade80;
+      --error: #fb7185;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--fg);
+           font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    a { color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; }
+    table th { text-align: left; font-weight: 500; color: var(--muted); }
+    table td { border-top: 1px solid var(--muted-border); }
+    button, select, input {
+      font: inherit; color: var(--fg); background: var(--panel);
+      border: 1px solid var(--muted-border); border-radius: 6px; padding: 0.4rem 0.7rem;
+    }
+    button { cursor: pointer; }
+    button[disabled] { cursor: not-allowed; opacity: 0.55; }
+    input { width: 100%; }
+    label { display: block; margin-bottom: 0.6rem; color: var(--muted); font-size: 0.85rem; }
+    article { border: 1px solid var(--muted-border); border-radius: 10px; padding: 1rem 1.2rem; background: var(--panel); }
+    body { padding: 1.5rem; max-width: 960px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+    h1 { margin: 0; font-size: 1.4rem; }
+    nav.tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--muted-border); }
+    nav.tabs button { background: none; border: none; color: var(--muted); padding: 0.5rem 1rem; cursor: pointer; font-size: 0.9rem; }
+    nav.tabs button.active { color: var(--accent); border-bottom: 2px solid var(--accent); margin-bottom: -1px; }
+    table { font-size: 0.85rem; }
+    table th, table td { padding: 0.4rem 0.6rem; }
+    .agent-id { font-family: var(--mono); font-size: 0.8rem; }
+    .skills { color: var(--muted); font-size: 0.75rem; }
+    .role-pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 0.5rem; font-size: 0.7rem; background: var(--muted); color: var(--bg); }
+    .role-pill.leader, .role-pill.admin { background: var(--accent); }
+    .role-pill.advisor, .role-pill.mentor { background: var(--cyan); }
+    .actions { display: flex; gap: 0.3rem; }
+    .actions select, .actions button { font-size: 0.75rem; padding: 0.2rem 0.5rem; margin: 0; }
+    .empty { color: var(--muted); padding: 2rem; text-align: center; }
+    .login-card { max-width: 480px; margin: 4rem auto; }
+    code.token-hint { background: var(--panel); padding: 0.5rem; display: block; font-size: 0.75rem; word-break: break-all; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
+    .stat-card { padding: 1rem; background: var(--panel); border-radius: 0.5rem; }
+    .stat-card .label { font-size: 0.7rem; text-transform: uppercase; color: var(--muted); }
+    .stat-card .value { font-size: 1.5rem; font-weight: 600; }
+    .toast { position: fixed; bottom: 1rem; right: 1rem; padding: 0.6rem 1rem; border-radius: 0.4rem; font-size: 0.85rem; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    .toast.show { opacity: 1; }
+    .toast.error { background: var(--error); color: white; }
+    .toast.ok { background: var(--ok); color: white; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const TOKEN_KEY = 'org_admin_token';
+    let token = localStorage.getItem(TOKEN_KEY) || '';
+    let activeTab = 'status';
+    let statusData = null;
+    let membersData = null;
+
+    function el(tag, attrs = {}, ...children) {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === 'on' && typeof v === 'object') {
+          for (const [evt, fn] of Object.entries(v)) e.addEventListener(evt, fn);
+        } else if (k === 'class') e.className = v;
+        // The `html` escape hatch (e.innerHTML = v) was removed in the static-sweep pass
+        // sweep: it had ZERO callers, so it cost nothing to delete and was the
+        // one path in this file that could turn data into markup. A dormant
+        // sink is still the local example the next contributor copies.
+        else if (/^on/i.test(k)) throw new Error('refusing event-handler attribute ' + k);
+        else e.setAttribute(k, v);
+      }
+      for (const c of children.flat()) {
+        if (c == null) continue;
+        e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+      }
+      return e;
+    }
+
+    function toast(msg, kind = 'ok') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `toast show ${kind}`;
+      setTimeout(() => { t.className = 'toast'; }, 2500);
+    }
+
+    async function apiCall(method, path, body = null) {
+      const opts = {
+        method,
+        headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json' },
+      };
+      if (body) opts.body = JSON.stringify(body);
+      const r = await fetch(path, opts);
+      if (r.status === 401) {
+        token = '';
+        localStorage.removeItem(TOKEN_KEY);
+        render();
+        toast('Auth failed — re-enter your admin token', 'error');
+        throw new Error('unauthorized');
+      }
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      return r.json();
+    }
+
+    async function loadStatus() {
+      try {
+        statusData = await apiCall('GET', '/admin/api/status');
+        render();
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast(`status: ${e.message}`, 'error');
+      }
+    }
+
+    async function loadMembers() {
+      try {
+        const r = await apiCall('GET', '/admin/api/members');
+        membersData = r;
+        render();
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast(`members: ${e.message}`, 'error');
+      }
+    }
+
+    async function changeRole(agentId, role) {
+      try {
+        await apiCall('POST', `/admin/api/members/${encodeURIComponent(agentId)}/role`, { role });
+        toast(`@${agentId} → ${role}`, 'ok');
+        await loadMembers();
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast(`role: ${e.message}`, 'error');
+      }
+    }
+
+    async function removeMember(agentId) {
+      if (!confirm(`Remove @${agentId}? This deletes from the in-memory registry, the Supabase row, and the auth-key store. Cannot be undone.`)) return;
+      try {
+        await apiCall('DELETE', `/admin/api/members/${encodeURIComponent(agentId)}`);
+        toast(`@${agentId} removed`, 'ok');
+        await loadMembers();
+      } catch (e) {
+        if (e.message !== 'unauthorized') toast(`remove: ${e.message}`, 'error');
+      }
+    }
+
+    function renderLogin() {
+      return el('div', { class: 'login-card' },
+        el('article', {},
+          el('h1', {}, 'Org Admin'),
+          el('p', {}, 'Paste your admin token to manage this org.'),
+          el('p', { class: 'skills' }, 'The token was printed exactly once when the org first started. Look for it in the startup logs, in the file ', el('code', {}, '.org-admin-token'), ', or in the ', el('code', {}, 'ORG_ADMIN_TOKEN'), ' env var.'),
+          el('input', {
+            type: 'password',
+            placeholder: '64 hex characters',
+            id: 'token-input',
+            autocomplete: 'off',
+          }),
+          el('button', {
+            on: { click: () => {
+              const v = document.getElementById('token-input').value.trim();
+              if (!/^[0-9a-f]{64}$/i.test(v)) {
+                toast('Token must be 64 hex characters', 'error');
+                return;
+              }
+              token = v;
+              localStorage.setItem(TOKEN_KEY, v);
+              render();
+              loadStatus();
+            }},
+          }, 'Sign in'),
+        ),
+      );
+    }
+
+    function renderHeader() {
+      return el('header', {},
+        el('h1', {}, 'Org Admin'),
+        el('button', {
+          class: 'secondary',
+          on: { click: () => { localStorage.removeItem(TOKEN_KEY); token = ''; render(); }},
+        }, 'Sign out'),
+      );
+    }
+
+    function renderTabs() {
+      const tabs = ['status', 'members'];
+      return el('nav', { class: 'tabs' },
+        tabs.map(t => el('button', {
+          class: t === activeTab ? 'active' : '',
+          on: { click: () => { activeTab = t; render(); if (t === 'members') loadMembers(); else loadStatus(); }},
+        }, t.charAt(0).toUpperCase() + t.slice(1))),
+      );
+    }
+
+    function renderStatus() {
+      if (!statusData) return el('div', { class: 'empty' }, 'Loading…');
+      const s = statusData;
+      return el('div', { class: 'status-grid' },
+        el('div', { class: 'stat-card' }, el('div', { class: 'label' }, 'Members'), el('div', { class: 'value' }, String(s.members_total))),
+        el('div', { class: 'stat-card' }, el('div', { class: 'label' }, 'Federation peers'), el('div', { class: 'value' }, String(s.federation_peers))),
+        el('div', { class: 'stat-card' }, el('div', { class: 'label' }, 'Org'), el('div', { class: 'value', style: 'font-size:1rem' }, s.agent_name || s.agent_id)),
+        el('div', { class: 'stat-card' }, el('div', { class: 'label' }, 'Public URL'), el('div', { class: 'value', style: 'font-size:0.85rem; word-break:break-all' }, s.public_url || '—')),
+      );
+    }
+
+    function renderMembers() {
+      if (!membersData) return el('div', { class: 'empty' }, 'Loading…');
+      if (membersData.members.length === 0) return el('div', { class: 'empty' }, 'No members yet.');
+      const rows = membersData.members.map(m => {
+        const select = el('select', {}, ['member', 'advisor', 'mentor', 'leader', 'admin'].map(r => el('option', { value: r }, r)));
+        const removeBtn = el('button', { class: 'secondary', on: { click: () => removeMember(m.agent_id) }}, '✕');
+        const applyBtn = el('button', { on: { click: () => changeRole(m.agent_id, select.value) }}, 'set');
+        return el('tr', {},
+          el('td', { class: 'agent-id' }, m.agent_id),
+          el('td', {}, m.name),
+          el('td', { class: 'skills' }, (m.skills || []).slice(0, 3).join(', ')),
+          el('td', {}, el('div', { class: 'actions' }, select, applyBtn, removeBtn)),
+        );
+      });
+      return el('table', {},
+        el('thead', {}, el('tr', {},
+          el('th', {}, 'agent_id'),
+          el('th', {}, 'name'),
+          el('th', {}, 'skills'),
+          el('th', {}, 'role actions'),
+        )),
+        el('tbody', {}, rows),
+      );
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+      // textContent, not innerHTML: it clears identically with no HTML parsing,
+      // and it means this file now contains no markup sink at all.
+      app.textContent = '';
+      if (!token) {
+        app.appendChild(renderLogin());
+        return;
+      }
+      app.appendChild(renderHeader());
+      app.appendChild(renderTabs());
+      app.appendChild(activeTab === 'status' ? renderStatus() : renderMembers());
+    }
+
+    render();
+    if (token) loadStatus();
+  </script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+# Public receipt-verifiability canary.
+#
+# Runs the documented third-party recipe against the DEPLOYED orgs. The claim —
+# "anyone can verify a receipt without trusting us" — is a property of the live
+# deployment, and a hermetic CI stack cannot observe whether the published sample
+# is actually fetchable and actually verifies. Same reasoning as catalog-canary.
+#
+# Installs ONLY sm-arp from PyPI, deliberately: if this job needed anything from
+# this repository, the claim would be false.
+name: receipt verify canary
+
+on:
+  schedule:
+    - cron: "30 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      orgs:
+        description: "Space-separated org base URLs (blank: use the CANARY_ORGS variable)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  verify-published-receipts:
+    name: a stranger can verify the published receipts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx sm-arp
+      # Targets are configuration — see the note in catalog-canary.yml. Unset in
+      # a fork, this skips rather than probing someone else's deployment.
+      - name: Verify each org's published bundle
+        env:
+          ORGS: ${{ github.event.inputs.orgs || vars.CANARY_ORGS }}
+        run: python scripts/receipt_verify_canary.py

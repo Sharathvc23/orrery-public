@@ -1,0 +1,56 @@
+{
+  "action": {
+    "amount": {
+      "cents": 3000,
+      "currency": "USD"
+    },
+    "category": "purchase",
+    "counterparty_label": "domain:amctheatres.com",
+    "human_summary": "2 tickets",
+    "jurisdiction": "US-MA",
+    "outcome": "completed"
+  },
+  "agent_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+  "expect": [
+    "INDETERMINATE",
+    "predicate_unsupported"
+  ],
+  "grant": {
+    "authorization_ceremony": null,
+    "delegation": {
+      "max_depth": 4,
+      "parent_grant_id": null
+    },
+    "grant_id": "dat:did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX:cc2e24da0e72b744",
+    "grantee_did": "did:key:z6Mko9hTggMwjSTEaJaPUfE6tqcy2xvU6BnNq3e3o8qVBiyH",
+    "grantor_did": "did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX",
+    "human_summary": "Buy movie tickets, <=$50 each, AMC only, MA/NY.",
+    "issued_at": "2026-04-01T00:00:00Z",
+    "not_after": "2026-06-30T23:59:59Z",
+    "not_before": "2026-04-01T00:00:00Z",
+    "revocation": null,
+    "scope": {
+      "action_categories": [
+        "purchase"
+      ],
+      "predicate": "action.amount.cents < 4000",
+      "stateful": {},
+      "stateless": {
+        "amount_cents_per_action_max": 5000,
+        "amount_currency": "USD",
+        "counterparty_allowlist": [
+          "domain:amctheatres.com"
+        ],
+        "jurisdictions": [
+          "US-MA",
+          "US-NY"
+        ]
+      }
+    },
+    "signature": "kQC+4cl6O1Coj1JkEMLwkucP6sA+uucoEHUGDy/rUntVk8zr0FmXjIls3Pkpv9oW8ZaSr8z8VLXLwDBpC8XyDA==",
+    "version": "dat/0.1"
+  },
+  "issued_at": "2026-04-10T19:00:00Z",
+  "kind": "grant",
+  "name": "predicate_unsupported_indeterminate"
+}

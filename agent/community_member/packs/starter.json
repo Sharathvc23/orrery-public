@@ -1,0 +1,7 @@
+{
+  "id": "starter",
+  "name": "Starter pack",
+  "description": "The everyday essentials, on by default: tell the time, fetch a web page, read/write files in a private workspace, do quick math, and book an appointment (with a signed receipt).",
+  "default_installed": true,
+  "skills": ["datetime", "web_fetch", "files", "calc", "booking"]
+}

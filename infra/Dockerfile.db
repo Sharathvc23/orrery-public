@@ -1,0 +1,42 @@
+# ───────────────────────────────────────────────────────────────────────────────
+# Orrery Postgres image for Railway — agent-native deploy (db + server, nothing else).
+#
+# Railway Postgres services have NO compose bind-mounts, so the init SQL the local
+# docker-compose mounts into /docker-entrypoint-initdb.d is instead BAKED into this
+# image. A FRESH Railway Postgres built from this Dockerfile boots the lean public
+# schema + seed on first start — fresh-deploy parity with compose.
+#
+# Load ORDER (same as docker-compose.yml's db service):
+#   01 schema  — infra/init.sql: the lean public-only schema (pg_dump of the
+#                agent-native schema; no Supabase RLS/roles, no auth/storage/
+#                realtime schemas). Prepends the pgvector extension.
+#   02 seed    — infra/seed.sql: demo rows.
+#
+# There is NO PostgREST, NO GoTrue, NO anon/service_role roles, and NO auth schema.
+# Agents authenticate with Ed25519-signed requests, and the org SERVER connects
+# straight to this Postgres via DATABASE_URL using pg_store (asyncpg) — nothing in
+# the deploy speaks the Supabase data API, so none of those roles/schemas are baked.
+#
+# Build context = REPO ROOT:  docker build -f infra/Dockerfile.db -t orrery-db .
+# ───────────────────────────────────────────────────────────────────────────────
+FROM pgvector/pgvector:pg15@sha256:a20a57d7aa5217a6af0a391ccf69f4a8512406d6c14be08132f801468cc3cc62
+
+# PGDATA in a SUBDIR of the data mount (not the mount root). A Railway persistent
+# volume mounts at /var/lib/postgresql/data carrying a lost+found dir, which makes
+# the dir non-empty → `initdb` refuses ("directory exists but is not empty") → the
+# init scripts NEVER run → the whole schema is absent. It is SILENT: the db container
+# reports deploy success, /health stays green and config-derived cards still resolve,
+# while every DB-backed surface fails (missing relations). Pointing PGDATA at an empty
+# subdir lets initdb run while lost+found stays at the mount root. (Compose uses
+# `image: pgvector` directly — not this Dockerfile — so the local/e2e stack is unaffected.)
+ENV PGDATA=/var/lib/postgresql/data/pgdata
+
+COPY infra/init.sql /docker-entrypoint-initdb.d/01-schema.sql
+COPY infra/seed.sql /docker-entrypoint-initdb.d/02-seed.sql
+# 03 role — the non-superuser application role and its grants. The hook runs the
+# same migration file an existing database is upgraded with, so there is one
+# grant list rather than two that can drift. Needs APP_DB_PASSWORD in the db
+# service environment; without it the hook fails the init rather than creating a
+# role that cannot log in.
+COPY infra/migrations/0006_app_role.sql /opt/orrery/0006_app_role.sql
+COPY infra/03-app-role.sh /docker-entrypoint-initdb.d/03-app-role.sh

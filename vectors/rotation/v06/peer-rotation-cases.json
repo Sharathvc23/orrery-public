@@ -1,0 +1,308 @@
+{
+  "description": "Peer-chapter key rotation (spec/0.6 \u00a78.5). Pins BOTH directions: one acceptance and every normative refusal. Signatures are real Ed25519 over the \u00a78.5.1 JCS signing material, so two runtimes agree byte-for-byte without reading each other's code.",
+  "spec": "spec/0.6/protocol.md#85-peer-chapter-key-rotation",
+  "signing_material": "jcs(attestation minus `signature`)",
+  "freshness_window_seconds": 3600,
+  "note_on_now": "Every case carries its own `now`; a verifier MUST use it rather than the wall clock, or R6/R7 become time-dependent and the vectors rot.",
+  "keys": {
+    "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+    "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+    "unrelated_did": "did:key:z6Mkg49NtQR2LyYRDCQFK4w1VVHqhypZSSRo7HsyuN7SV7v5",
+    "next_did": "did:key:z6MktwtqAzuD5F77tAMBMwNs1KybZeff61EehV9xB1ZpXQG7",
+    "seeds_note": "Ed25519 seeds are 0x11/0x22/0x33/0x44 repeated 32x \u2014 regenerate with _generate.py."
+  },
+  "cases": [
+    {
+      "id": "ACCEPT-signed-by-the-old-key",
+      "expect": "accept",
+      "why": "The only acceptable shape: continuity proven with the key the receiver already trusts.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940,
+        "signature": "9SEu7gX2OCjcbj+lGclVoIo7fZkfKNegxyL6NiXagEFM/vZJBppZtMhoFmO3i/fcPOk60vzCe8JSL9wqJ2LfBw=="
+      }
+    },
+    {
+      "id": "R1-unsigned",
+      "expect": "refuse",
+      "refusal": "no_signature",
+      "why": "An unsigned assertion is an attacker naming a key.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940
+      }
+    },
+    {
+      "id": "R2-signed-by-the-NEW-key",
+      "expect": "refuse",
+      "refusal": "signature_not_by_pinned_key",
+      "why": "THE hijack case. Proves only that the presenter holds the key they are installing. An implementation that verifies against new_did (which is right there in the attestation) accepts every takeover.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940,
+        "signature": "pkXdvWXzWjuToU5+LYCye+WXlO7dioaRpMgsqXcylaIt07T4pYqR+wQjZgArUB5YiqboIpLSmf8WnHJSBMwzAg=="
+      }
+    },
+    {
+      "id": "R3-signed-by-an-unrelated-key",
+      "expect": "refuse",
+      "refusal": "signature_not_by_pinned_key",
+      "why": "Otherwise any third party rotates any peer.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940,
+        "signature": "qfnfMcVhHr2STmgcZ/eB93yNLb3KVdudnTpCaVxCLW95IhL2q4J4yUIbUam18scBaB1ZGqWAwv049NYfK1ZcAA=="
+      }
+    },
+    {
+      "id": "R4-old-did-does-not-match-the-pin",
+      "expect": "refuse",
+      "refusal": "old_did_not_pinned",
+      "why": "Proves continuity from a key this receiver never trusted. Signature is valid over its own contents \u2014 validity is not the question.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6Mkg49NtQR2LyYRDCQFK4w1VVHqhypZSSRo7HsyuN7SV7v5",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940,
+        "signature": "s+HL1J6xGLS6cTnAz0V/hnFJAC6aZds61XMu4VmQyKDYpx4n3ObMEhgu/rkcJ3iT4c4P7tAY0H/ryCur+C2QBQ=="
+      }
+    },
+    {
+      "id": "R5-bound-to-a-different-peer",
+      "expect": "refuse",
+      "refusal": "peer_mismatch",
+      "why": "Cross-peer replay: a valid attestation for X would otherwise install a key for Y.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "london-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940,
+        "signature": "mXWmFQGNVYMOC+v5tDvthUys4tBcpK6BsyzdMBjwEwzBiJEqOTyd2eK7qPRbfpKpj0/MbMlQ6G7eJ3qXsD8LCA=="
+      }
+    },
+    {
+      "id": "R6-stale-replay",
+      "expect": "refuse",
+      "refusal": "stale",
+      "why": "Unbounded validity lets a captured attestation reinstall a retired key later.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784996399,
+        "signature": "9SYViRIRuj5vqhNNo81Y8xFlG95Sczz8gBAOp+YxUHGw5AqEK/O8rdCf3nKz0TESkx0kZcFvbtk46zYZidv5AA=="
+      }
+    },
+    {
+      "id": "R7-future-dated",
+      "expect": "refuse",
+      "refusal": "future_dated",
+      "why": "A far-future issued_at would never expire, defeating R6.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1785003601,
+        "signature": "H+bIwO2AZg0y5h59jJJGKWjj47Oiu3wNDycMRpOaSYKxk3ZGa0G8s36eEj786QAJslc55uaB5WD/a2BugVdNCQ=="
+      }
+    },
+    {
+      "id": "R8a-new-did-equals-old",
+      "expect": "refuse",
+      "refusal": "new_did_invalid",
+      "why": "A no-op rotation must never mutate a pin.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "issued_at": 1784999940,
+        "signature": "11ac3BXdvpv/BzQu8IBeKgXHv+tiAljdrAVs6aWGabRTo6NUxNog6B6soq8CERRGP8oHRcalJ0grHWY3VTDUBw=="
+      }
+    },
+    {
+      "id": "R8b-new-did-malformed",
+      "expect": "refuse",
+      "refusal": "new_did_invalid",
+      "why": "An unparseable identifier must never be pinned.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "not-a-did",
+        "issued_at": 1784999940,
+        "signature": "vSBeP4bOXlWVpfTmOxVAn/VczAUsTK0nknxbgciTXLspA81QlszNAefsV+4aqsNXJM9gW4KiDXj6ctkgTw4ADQ=="
+      }
+    },
+    {
+      "id": "R-type-wrong-discriminator",
+      "expect": "refuse",
+      "refusal": "wrong_type",
+      "why": "A different type is not a rotation and must not be processed as one.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.something_else",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940,
+        "signature": "oALuXF67ufxdxmw7N/6VmPOR+kyix822FrxZaLr5/wyayW6BRpdusJtALRGkZIZgpkd/a6TtTE2fIdJBO2keCQ=="
+      }
+    },
+    {
+      "id": "R-no-pin-to-prove-continuity-from",
+      "expect": "refuse",
+      "refusal": "no_pin",
+      "why": "No pin means no old key, so continuity cannot be proven. First sighting is TOFU \u2014 a different path, never rotation.",
+      "pinned_did": null,
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1784999940,
+        "signature": "9SEu7gX2OCjcbj+lGclVoIo7fZkfKNegxyL6NiXagEFM/vZJBppZtMhoFmO3i/fcPOk60vzCe8JSL9wqJ2LfBw=="
+      }
+    },
+    {
+      "id": "R-tampered-new-did-after-signing",
+      "expect": "refuse",
+      "refusal": "signature_not_by_pinned_key",
+      "why": "new_did edited after signing. Demonstrates the signing material actually binds it \u2014 if this were accepted, the signed fields would be decorative.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6Mkg49NtQR2LyYRDCQFK4w1VVHqhypZSSRo7HsyuN7SV7v5",
+        "issued_at": 1784999940,
+        "signature": "9SEu7gX2OCjcbj+lGclVoIo7fZkfKNegxyL6NiXagEFM/vZJBppZtMhoFmO3i/fcPOk60vzCe8JSL9wqJ2LfBw=="
+      }
+    },
+    {
+      "id": "R-tampered-issued-at-after-signing",
+      "expect": "refuse",
+      "refusal": "signature_not_by_pinned_key",
+      "why": "issued_at edited after signing \u2014 the same binding property for the freshness field, without which R6/R7 could be edited away.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "attestation": {
+        "type": "chapter.key.rotation",
+        "peer_chapter_id": "boston-chapter",
+        "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+        "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+        "issued_at": 1785000000,
+        "signature": "9SEu7gX2OCjcbj+lGclVoIo7fZkfKNegxyL6NiXagEFM/vZJBppZtMhoFmO3i/fcPOk60vzCe8JSL9wqJ2LfBw=="
+      }
+    }
+  ],
+  "chain_cases": [
+    {
+      "id": "CHAIN-two-rotations-walked-from-a-pin-two-links-back",
+      "expect": "accept",
+      "why": "A receiver offline across two rotations holds a pin two links back. It walks forward; a single attestation could not prove continuity to it, and accepting one anyway would be accepting an unproven key.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "final_did": "did:key:z6MktwtqAzuD5F77tAMBMwNs1KybZeff61EehV9xB1ZpXQG7",
+      "rotations": [
+        {
+          "type": "chapter.key.rotation",
+          "peer_chapter_id": "boston-chapter",
+          "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+          "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+          "issued_at": 1784999880,
+          "signature": "sDSbipBeO7KTMTvxcqY8zNjPIbAU0/uiAjsFWgyaNk6wM0auUyooPT+A2JFK4fQ6ZzBRVH9jGG155iTvR3M8AA=="
+        },
+        {
+          "type": "chapter.key.rotation",
+          "peer_chapter_id": "boston-chapter",
+          "old_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+          "new_did": "did:key:z6MktwtqAzuD5F77tAMBMwNs1KybZeff61EehV9xB1ZpXQG7",
+          "issued_at": 1784999940,
+          "signature": "0iEoFpZPWFVYvbfttsp5E6cvM4ikyMHwE6vrKGMUWTrP6SgK6Z4xjyD6mg2DUwdGzoB2wapQtK1XZZqAl9lMAw=="
+        }
+      ]
+    },
+    {
+      "id": "R9-chain-break",
+      "expect": "refuse",
+      "refusal": "chain_break",
+      "why": "The second link does not continue from the first. Accepting it splices an unproven key into the middle of the chain.",
+      "pinned_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+      "peer_chapter_id": "boston-chapter",
+      "now": 1785000000,
+      "rotations": [
+        {
+          "type": "chapter.key.rotation",
+          "peer_chapter_id": "boston-chapter",
+          "old_did": "did:key:z6MktULudTtAsAhRegYPiZ6631RV3viv12qd4GQF8z1xB22S",
+          "new_did": "did:key:z6MkqGC3nWZhYieEVTVDKW5v588CiGfsDSmRVG9ZwwWTvLSK",
+          "issued_at": 1784999880,
+          "signature": "sDSbipBeO7KTMTvxcqY8zNjPIbAU0/uiAjsFWgyaNk6wM0auUyooPT+A2JFK4fQ6ZzBRVH9jGG155iTvR3M8AA=="
+        },
+        {
+          "type": "chapter.key.rotation",
+          "peer_chapter_id": "boston-chapter",
+          "old_did": "did:key:z6Mkg49NtQR2LyYRDCQFK4w1VVHqhypZSSRo7HsyuN7SV7v5",
+          "new_did": "did:key:z6MktwtqAzuD5F77tAMBMwNs1KybZeff61EehV9xB1ZpXQG7",
+          "issued_at": 1784999940,
+          "signature": "41/KU96ti523G/GZxj8uzA1NyUGlK1Qtl8sh+OEFxPw2vXx9Uagb0Z+iz0FeexcGjlXVrUQN2tt5GPrPQS0LDg=="
+        }
+      ]
+    }
+  ]
+}

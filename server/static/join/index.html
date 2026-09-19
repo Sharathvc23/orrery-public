@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      This page's URL carries a single-use invite token in the query string, so it
+      must not appear in a Referer header. The route sends
+      `Referrer-Policy: no-referrer` (chapter_agent._static_page); the meta repeats
+      it so the policy also holds when the file is served by a static file server,
+      as renderer/ and smb_funnel/ already are. The page currently has no
+      cross-origin subresource and no outbound link.
+    -->
+    <meta name="referrer" content="no-referrer" />
+    <title>Join this org</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #0b0d12; color: #e6e8ee;
+             font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      main { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+      .join-head h1 { font-size: 22px; margin: 0 0 6px; }
+      .muted { color: #8b90a0; }
+      .runtimes { display: grid; gap: 12px; margin: 22px 0; }
+      .runtime { border: 1px solid #1c212c; border-radius: 10px; padding: 16px; background: #0e1118; }
+      .runtime h3 { margin: 0 0 4px; font-size: 15px; }
+      .runtime .blurb { margin: 0 0 10px; color: #b6bccb; font-size: 14px; }
+      .runtime-unavailable { opacity: .72; border-style: dashed; }
+      .unavailable { color: #f5c377; font-size: 13px; margin: 0 0 10px; }
+      code.cmd { display: block; background: #070910; border: 1px solid #1c212c; border-radius: 7px;
+                 padding: 9px 11px; margin-bottom: 10px; overflow-x: auto; white-space: pre;
+                 font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a7d8b9; }
+      button { font: inherit; border-radius: 7px; padding: 7px 14px; border: 1px solid #2b3550;
+               background: #161c28; color: #e6e8ee; cursor: pointer; }
+      button[disabled] { cursor: not-allowed; opacity: .55; }
+      .empty.warn { color: #f5c377; border-left: 2px solid #f5c377; padding-left: 14px; }
+      .empty.warn p { color: #b6bccb; }
+      .invite-notice { border: 1px solid #1c212c; border-left: 2px solid #6f8cc4; border-radius: 0 8px 8px 0;
+                       background: #0e1118; padding: 14px 16px; margin: 18px 0 0; font-size: 14px; }
+      .invite-notice strong { display: block; margin-bottom: 6px; }
+      .invite-notice p { margin: 0 0 8px; color: #b6bccb; }
+      .invite-notice p:last-child { margin-bottom: 0; }
+      .invite-notice-degraded { border-left-color: #f5c377; }
+      .join-foot { border-top: 1px solid #1c212c; padding-top: 14px; font-size: 13px; }
+      code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a7b0c6; }
+    </style>
+  </head>
+  <body>
+    <main id="root">
+      <p class="muted">Loading…</p>
+    </main>
+    <script type="module" src="/ui/join-boot.js"></script>
+  </body>
+</html>

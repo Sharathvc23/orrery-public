@@ -1,0 +1,7 @@
+{
+  "name": "crm",
+  "version": "1.0.0",
+  "description": "File and update CRM records (contacts, deals, interactions) through the org, with a signed receipt for every mutation.",
+  "capabilities": [],
+  "builtin": true
+}

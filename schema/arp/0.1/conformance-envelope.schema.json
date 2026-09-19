@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarminds.ai/schemas/sm-arp/0.1/conformance-envelope.schema.json",
+  "title": "ARP Conformance Badge Envelope",
+  "description": "Signed envelope a runtime ships at .nanda/conformance.json. See spec/arp/0.1/conformance.md for the normative semantics.",
+  "type": "object",
+  "required": ["payload", "signed_by", "signed_at", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "payload": { "$ref": "#/$defs/payload" },
+    "signed_by": { "$ref": "common.schema.json#/$defs/didKey" },
+    "signed_at": { "$ref": "#/$defs/rfc3339UtcTimestamp" },
+    "signature": { "$ref": "common.schema.json#/$defs/base64Ed25519Signature" }
+  },
+  "$defs": {
+    "rfc3339UtcTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|\\+00:00)$",
+      "description": "RFC 3339 timestamp in UTC, either 'Z' suffix or '+00:00' offset, with optional fractional seconds."
+    },
+    "nonNegativeInt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "payload": {
+      "type": "object",
+      "title": "ARP Conformance Badge Payload",
+      "description": "Run result the signature commits to. See conformance.md §5.",
+      "required": [
+        "schema_version",
+        "runtime",
+        "protocol_versions",
+        "suite_digest",
+        "completed_at",
+        "exit_status",
+        "passed",
+        "failed",
+        "skipped",
+        "xfailed",
+        "xpassed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Bound to spec/arp/0.1/conformance.md. A future payload schema bumps this."
+        },
+        "runtime": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "minLength": 1,
+          "description": "Stable identifier of the runtime that produced the run."
+        },
+        "adapter": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "minLength": 1,
+          "description": "Specific adapter exercised in the run. Optional."
+        },
+        "protocol_versions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+$"
+          },
+          "description": "Protocol versions verified against — e.g. ['0.2', '0.3']."
+        },
+        "suite_digest": { "$ref": "common.schema.json#/$defs/sha256Hash" },
+        "completed_at": { "$ref": "#/$defs/rfc3339UtcTimestamp" },
+        "exit_status": {
+          "type": "integer",
+          "description": "Process exit status of the run. 0 = passing run."
+        },
+        "passed": { "$ref": "#/$defs/nonNegativeInt" },
+        "failed": { "$ref": "#/$defs/nonNegativeInt" },
+        "skipped": { "$ref": "#/$defs/nonNegativeInt" },
+        "xfailed": { "$ref": "#/$defs/nonNegativeInt" },
+        "xpassed": { "$ref": "#/$defs/nonNegativeInt" },
+        "errored": { "$ref": "#/$defs/nonNegativeInt", "description": "Count of checks that errored (distinct from a clean fail). Emitted by sm-conformance badges." },
+        "skipped_vectors": { "type": "array", "items": { "type": "string" }, "description": "Names of the vectors/checks skipped this run (accompanies `skipped`)." },
+        "extensions": { "$ref": "common.schema.json#/$defs/extensionsObject" }
+      }
+    }
+  }
+}

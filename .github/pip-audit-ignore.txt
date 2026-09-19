@@ -1,0 +1,10 @@
+# Advisories deliberately accepted, passed to pip-audit as --ignore-vuln.
+#
+# One id per line. EVERY entry must carry, on the preceding comment lines:
+#   who accepted it, the date, WHY it is acceptable here, and a review date.
+# An entry without a reason is indistinguishable from an entry added to get a
+# red build green, which is the failure this file exists to make visible.
+#
+# Empty today: pip-audit reports no known vulnerabilities against
+# agent/requirements.lock, server/requirements.lock or server/requirements.txt
+# as of 2026-08-02, so nothing has been accepted.

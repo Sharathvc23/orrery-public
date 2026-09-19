@@ -1,0 +1,138 @@
+{
+  "source": "server/federation_intelligence.py:get_our_summary()",
+  "target": "sm_federation.wire.load_schema('intelligence-envelope') — the installed distribution",
+  "_comment": [
+    "The field-level delta between what Orrery emits and what the published",
+    "profile defines, both directions, every field classified.",
+    "",
+    "VERDICTS for a field Orrery emits:",
+    "  MAPPED                 -> the profile defines it (possibly under another",
+    "                            name). `protocol` must be a property of the",
+    "                            published schema.",
+    "  DRIFT                  -> the profile SHOULD carry it and does not. This is",
+    "                            a HARD FAILURE, not a note: a DRIFT entry fails",
+    "                            the suite until the profile is moved forward.",
+    "                            The list is empty by construction.",
+    "  DELIBERATE-EXCLUSION   -> stays out of the envelope on purpose.",
+    "",
+    "WHY DELIBERATE-EXCLUSION IS NOT A LABEL THAT EXEMPTS. Each entry is a claim",
+    "the suite checks against both sides:",
+    "  * the field must actually be emitted by Orrery  -> no phantom exclusions",
+    "  * every emitted field must appear here exactly once -> nothing opts out by",
+    "    being unlisted",
+    "  * the field must be ABSENT from the published schema -> the moment the",
+    "    profile adopts it, the exclusion becomes false and this suite goes red.",
+    "    That is the cross-repo drift detector: it fires on a change made in the",
+    "    OTHER repository.",
+    "  * `reason_code` must be one of the closed set below and `reason` must be a",
+    "    real justification, not a restatement of the field name.",
+    "",
+    "reason_code:",
+    "  PROFILE_FORBIDS        -> §3 forbids this content class. `reason` must cite",
+    "                            the section.",
+    "  OUT_OF_PROFILE_SCOPE   -> the profile has no such concept; adding one is a",
+    "                            protocol decision, not this suite's to make.",
+    "  IMPLEMENTATION_INTERNAL-> an artifact of how Orrery computes intelligence,",
+    "                            meaningless to a peer that computes it otherwise."
+  ],
+  "fields": [
+    {
+      "orrery": "chapter_id",
+      "protocol": "community_id",
+      "verdict": "MAPPED",
+      "reason": "Renamed by genericization. 'chapter' is NANDA-specific vocabulary; the published profile federates 'communities'. Same value, same meaning."
+    },
+    {
+      "orrery": "chapter_name",
+      "protocol": "community_name",
+      "verdict": "MAPPED",
+      "reason": "Renamed by genericization, as chapter_id -> community_id. Same value, same meaning."
+    },
+    {
+      "orrery": "skill_graph",
+      "protocol": "skill_graph",
+      "verdict": "MAPPED",
+      "reason": "Identical shape and meaning: {skill: integer weight} over the whole community."
+    },
+    {
+      "orrery": "skill_gaps",
+      "protocol": "skill_gaps",
+      "verdict": "MAPPED",
+      "reason": "Identical: the list of skills the community lacks, as plain strings."
+    },
+    {
+      "orrery": "trending_topics",
+      "protocol": "trending_topics",
+      "verdict": "MAPPED",
+      "reason": "Identical: the list of topics gaining attention, as plain strings."
+    },
+    {
+      "orrery": "recommendations",
+      "protocol": "recommendations",
+      "verdict": "MAPPED",
+      "reason": "Identical: list of strings. Note Orrery emits this key only when its intelligence cache is populated; the empty-cache branch omits it. Both branches are classified here."
+    },
+    {
+      "orrery": "top_skills",
+      "protocol": "top_skills",
+      "verdict": "MAPPED",
+      "reason": "Identical: highest-weighted skills derived from skill_graph, capped at ten on both sides."
+    },
+    {
+      "orrery": "member_count",
+      "protocol": "member_count",
+      "verdict": "MAPPED",
+      "reason": "Identical: the aggregate count of members, carrying no per-member identity."
+    },
+    {
+      "orrery": "active_member_count",
+      "protocol": "active_member_count",
+      "verdict": "MAPPED",
+      "reason": "Was the one real DRIFT this measurement found: Orrery emitted it and the published envelope had no property for it, so with additionalProperties:false the signal could not be carried at all. Resolved by moving the PROFILE forward (sm-federation 0.3.0) rather than by making Orrery drop it — it is an aggregate count with no per-member identity, the same class as member_count, so §3 permits it. Orrery derives it as len(intel['active_members']); 'active_members' itself is a member LIST and is never emitted (see the note in protocol_only)."
+    },
+    {
+      "orrery": "patterns",
+      "protocol": null,
+      "verdict": "DELIBERATE-EXCLUSION",
+      "reason_code": "IMPLEMENTATION_INTERNAL",
+      "reason": "Free-text behavioural patterns named by Orrery's own reflect cycle ('weekly cadence', ...). They describe how Orrery models its members, not a fact about the community, and a peer running a different intelligence model cannot interpret them. Exporting them would put one implementation's internals into a vendor-neutral wire format."
+    },
+    {
+      "orrery": "last_reflected",
+      "protocol": null,
+      "verdict": "DELIBERATE-EXCLUSION",
+      "reason_code": "IMPLEMENTATION_INTERNAL",
+      "reason": "When Orrery's reflect cycle last rebuilt its intelligence model. Deliberately NOT mapped to the profile's generated_at, which is when the SNAPSHOT was produced — a different fact. Mapping them would make a stale snapshot look fresh, or a fresh snapshot of a stale model look stale. generated_at is caller-supplied at envelope build time."
+    },
+    {
+      "orrery": "policy_snapshot",
+      "protocol": null,
+      "verdict": "DELIBERATE-EXCLUSION",
+      "reason_code": "OUT_OF_PROFILE_SCOPE",
+      "reason": "Rows of Orrery's federated governance policy, shipped to peers for the cross-chapter policy merge. Federated policy is an entire subsystem with its own trust model and merge semantics; the published profile has no concept of it and giving it one is a protocol decision, not something a conformance suite should infer from one implementation."
+    }
+  ],
+  "protocol_only": [
+    {
+      "protocol": "type",
+      "verdict": "NOT_EMITTED",
+      "reason": "The sm-feed payload discriminator. Orrery has no feed transport at all, so nothing consumes a discriminator. Required by the profile — this is part of why the intelligence-envelope-emitter claim is implemented:false."
+    },
+    {
+      "protocol": "version",
+      "verdict": "NOT_EMITTED",
+      "reason": "Orrery's summary carries no envelope version, so a peer cannot tell which profile produced it. Required by the profile."
+    },
+    {
+      "protocol": "generated_at",
+      "verdict": "NOT_EMITTED",
+      "reason": "Orrery stamps fetched_at on the RECEIVING side instead, so the timestamp reflects when the reader pulled, not when the sender snapshotted — a clock the sender does not control and cannot be held to. Required by the profile."
+    }
+  ],
+  "not_emitted_by_either": [
+    {
+      "field": "active_members",
+      "reason": "Reported upstream as an emitted field; it is not. It is an INPUT key inside Orrery's intelligence cache (a list of member identifiers), read by get_our_summary only as len(...) and by two local A2UI surfaces. It never reaches the federation wire, and it must not: §3 forbids per-member identifiers in an envelope. Recorded here so the claim is not re-litigated, and asserted by the suite so it stays true."
+    }
+  ]
+}

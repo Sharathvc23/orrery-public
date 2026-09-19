@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Sharathvc23/orrery/schema/skill/0.1/skill-package.schema.json",
+  "title": "NANDA Skill Package (.nandaskill) v0.1",
+  "description": "A downloadable, portable, signed skill BUNDLE for the NANDA chapter skill marketplace. A `.nandaskill` file is a ZIP archive with exactly three members: `manifest.json`, `content.bin`, and `signature.json`. It is ADDITIVE over the manifest+content-reference publish path — it reuses the same Ed25519 publisher signature (a detached signature over `content_sha256`, the hex sha256 of the canonical content), so a skill published via /api/skills/publish packs and re-verifies with its stored signature UNCHANGED. This document describes the two JSON members and the archive layout; the archive itself is a standard ZIP, not JSON, so this schema is descriptive of the members plus the layout contract.",
+  "type": "object",
+  "properties": {
+    "package_format": { "const": "nandaskill/0.1" },
+    "archive": {
+      "type": "object",
+      "description": "ZIP layout contract. A conformant reader MUST find all three members and MUST fail closed if any is missing, extra-critical members are tampered, or a hash does not match.",
+      "properties": {
+        "manifest.json": {
+          "type": "string",
+          "description": "The skill manifest, conforming to skill-manifest.schema.json. Human-readable JSON. It is BOUND to the signed content: a verifier MUST check that its canonical form (sorted keys, compact separators, UTF-8) equals `content.bin` byte-for-byte, so the manifest cannot be swapped."
+        },
+        "content.bin": {
+          "type": "string",
+          "description": "The exact signed content bytes — the canonical form of the manifest (JSON with sorted keys, compact separators `(\",\",\":\")`, UTF-8, ensure_ascii=false). `sha256(content.bin)` MUST equal `signature.json.content_sha256`. For the current manifest-defined skill model the content IS the canonical manifest; the field exists so a future non-manifest payload has a home without changing the layout."
+        },
+        "signature.json": { "$ref": "#/$defs/signature" }
+      },
+      "required": ["manifest.json", "content.bin", "signature.json"]
+    }
+  },
+  "$defs": {
+    "signature": {
+      "type": "object",
+      "title": "signature.json — the detached signed-statement record",
+      "description": "JCS-canonical (sorted keys, compact) record carrying the detached Ed25519 publisher signature. The `signature` is over `content_sha256` (the hex string), matching skill_registry.verify_skill_signature — i.e. the EXISTING publisher-signing input, reused verbatim so a previously-published skill verifies unchanged. Verification is FAIL-CLOSED: reject on a missing/tampered field, a `content_sha256` that does not match `sha256(content.bin)`, a `manifest.json` that does not canonicalize to `content.bin`, or an Ed25519 signature that does not verify by `signing_key_did`.",
+      "properties": {
+        "package_format": { "const": "nandaskill/0.1" },
+        "alg": { "const": "ed25519" },
+        "signing_key_did": {
+          "type": "string",
+          "description": "did:key of the publisher key whose Ed25519 public key verifies `signature`.",
+          "pattern": "^did:key:z[1-9A-HJ-NP-Za-km-z]+$"
+        },
+        "content_sha256": {
+          "type": "string",
+          "description": "Lowercase hex sha256 of `content.bin` — the exact bytes the publisher signed.",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "signature": {
+          "type": "string",
+          "description": "Base64 Ed25519 signature over the UTF-8 bytes of `content_sha256` (the hex string), by the key in `signing_key_did`."
+        }
+      },
+      "required": ["package_format", "alg", "signing_key_did", "content_sha256", "signature"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Keep the Docker build context small. Image builds only need source + the
+# committed dashboard bundle (community_member/web), never Node deps or VCS.
+**/node_modules
+**/dist
+.git
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/venv
+**/.mypy_cache
+*.log
+.env
+
+# Runtime data + operator secrets must NEVER bake into the image — these are
+# generated per-deployment and gitignored, but the build context is the repo
+# root, so a local dev run's artifacts would otherwise be COPYed in (caught in
+# the live e2e: a stale .chapter-admin-token leaked into the image).
+**/.nanda/
+**/.org/
+**/.chapter-admin-token
+**/.org-admin-token

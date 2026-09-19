@@ -1,0 +1,82 @@
+# Orrery SMB host image. Build context is the REPO ROOT: this service is a pair
+# of flat modules under smb_host/ that import the community_member package from
+# agent/, so both subtrees must be in the context.
+#
+# smb_host/pyproject.toml previously described this service as "deployed from
+# its own image" while no image for it existed anywhere in the repository, and
+# the package is not pip-installable (flat layout, two top-level modules, no
+# build backend). This file is what makes that description true. The other way
+# to run it is documented in smb_host/README.md and does not involve installing
+# smb_host as a package either.
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# The agent lockfile is the fully-resolved runtime set for community_member,
+# which this host depends on for per-tenant isolation and the canonical card
+# builder. Copied first so a code change does not invalidate the dependency
+# layer.
+COPY agent/requirements.lock /app/agent/requirements.lock
+RUN pip install --no-cache-dir -r /app/agent/requirements.lock
+
+# community_member itself, installed without deps because the lockfile above
+# already pinned them. Mirrors what CI does for the smb_host job.
+COPY agent/ /app/agent/
+RUN pip install --no-cache-dir -e /app/agent --no-deps
+
+COPY smb_host/ /app/smb_host/
+
+# Where tenant homes live. The module's default is a user-writable path under
+# XDG_DATA_HOME so that importing it on a normal machine works; an absolute
+# container path belongs here, next to the volume that backs it.
+ENV SMB_HOST_DATA_DIR=/data/smb-tenants
+
+# NO `VOLUME ["/data"]`, DELIBERATELY, AND IT MUST NOT BE RE-ADDED.
+#
+# The platform we deploy this to rejects the directive outright and the image
+# does not build:
+#     dockerfile invalid: docker VOLUME at Line 37 is not supported,
+#     use Railway Volumes
+# Persistence there is provided by a platform volume attached at /data, so
+# nothing about the deployed shape depended on this line.
+#
+# What it did for a plain `docker run` with no -v was give the container an
+# ANONYMOUS volume instead of writing into the container layer. That reads like a
+# safety net and measurably is not one — driven on the image built with the
+# directive still present:
+#   - run without -v, provision a business            -> anonymous volume A
+#   - docker rm the container, run a new one, no -v    -> anonymous volume B
+#   - the tenant provisioned before the redeploy       -> 404
+# The new container gets a NEW anonymous volume, so the businesses are gone at
+# exactly the moment the net was supposed to catch them. Volume A survives, is
+# referenced by nothing, and is not findable except by hash — 28 dangling volumes
+# on the machine this was measured on. So the directive did not preserve a
+# deployment; it silently retained every tenant's encrypted private key in a
+# volume nobody knows about. (And even reattached by hash it would not help: the
+# default `device` keystore cannot decrypt vaults written under the previous
+# container's hostname — see smb_host/OPERATIONS.md §1.)
+#
+# Removing it therefore costs an improvised `docker run` nothing it could have
+# used, and the documented command in smb_host/README.md passes -v explicitly.
+# THAT MOUNT IS NOW THE ONLY THING BETWEEN AN OPERATOR AND LOSING EVERY
+# PROVISIONED BUSINESS, so it is asserted by a test rather than left to prose:
+# see test_the_dockerfile_carries_no_volume_directive and
+# test_the_readme_docker_command_mounts_the_data_dir in smb_host/test_main.py.
+
+# HOST_PUBLIC_URL is deliberately NOT defaulted. It is the address written into
+# every provisioned agent's card and returned to the caller, so a default would
+# be a guess that looks like a fact. The host boots without it and refuses to
+# provision until it is set — run with, for example:
+#   -e HOST_PUBLIC_URL=https://smb.example.com
+
+WORKDIR /app/smb_host
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

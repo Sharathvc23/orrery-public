@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanda.org/schema/0.4/a2ui-surface-v08.json",
+  "title": "A2UI v0.8 Surface Envelope (OpenClaw wire shape)",
+  "description": "Top-level envelope returned by GET /api/surfaces/{page_id}?schema=v0.8 (and its /stream counterpart) — the legacy shape OpenClaw Canvas renders. Derived from the runtime's real output (surfaces.to_v08), not from prose: `beginRendering` replaces `createSurface` with the root hoisted onto it, `surfaceUpdate` replaces `updateComponents` and carries no `root`, and each component nests its payload under a type-name key instead of a flat `component` discriminator. Lives beside the native schema it downgrades FROM: the directory number tracks the SPEC version (0.3 → A2UI 0.9, 0.4 → A2UI 0.10), and A2UI 0.8 is not any spec major's native version — it is the downgrade every major from 0.2 on must serve.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["beginRendering", "surfaceUpdate", "version"],
+  "properties": {
+    "beginRendering": {
+      "description": "The v0.9/v0.10 `updateComponents.root`, hoisted. The runtime emits an EMPTY object when the source surface had no root (`{\"root\": root} if root else {}`), so `root` is not required. It carries no `surfaceId` — spec/0.4/a2ui.md §6's example shows one, but neither the normative transform vector (vectors/a2ui/v09-to-v08-transforms.json) nor any runtime emits it; this schema pins what the code does, so adding it would fail CI deliberately rather than silently. (The one other prose disagreement recorded here — `meta` surviving the downgrade — is GONE: the strict-selector rule made the runtime strip it, and a2ui-component-v08.json now rejects it.)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "root": { "type": "string", "minLength": 1 }
+      }
+    },
+    "surfaceUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surfaceId", "components"],
+      "properties": {
+        "surfaceId": { "type": "string", "minLength": 1 },
+        "components": {
+          "type": "array",
+          "items": { "$ref": "a2ui-component-v08.json" }
+        }
+      }
+    },
+    "version": { "const": "0.8" }
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stellarminds.ai/schemas/sm-arp/0.1/action.schema.json",
+  "title": "ARP Action",
+  "description": "The action object describing what was done. See spec.md §4.",
+  "type": "object",
+  "required": ["category", "human_summary", "outcome"],
+  "additionalProperties": false,
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "purchase",
+        "payment_sent",
+        "payment_received",
+        "message_sent",
+        "message_received",
+        "decision_made",
+        "data_shared",
+        "appointment_booked",
+        "appointment_cancelled",
+        "subscription_changed",
+        "record_filed",
+        "account_created",
+        "account_closed",
+        "attestation_issued",
+        "attestation_received",
+        "commitment_entered",
+        "commitment_fulfilled",
+        "commitment_breached",
+        "vote_cast",
+        "authority_granted",
+        "authority_revoked",
+        "other"
+      ],
+      "description": "Action category. Strict verifiers reject unknown values; tolerant verifiers map to 'other' with the original in machine_payload.action_type_label."
+    },
+    "human_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 280,
+      "description": "Single-sentence plain-language description in the principal's preferred language. Max 280 Unicode code points."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["completed", "failed", "partial", "reversed", "pending"]
+    },
+    "counterparty_did": {
+      "$ref": "common.schema.json#/$defs/didKey"
+    },
+    "counterparty_label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Human-readable name of the counterparty."
+    },
+    "amount": {
+      "$ref": "common.schema.json#/$defs/amount"
+    },
+    "machine_payload": {
+      "type": "object",
+      "description": "Action-specific structured details. Free-form in v0.1; per-category schemas may be normalized in future versions.",
+      "additionalProperties": true
+    },
+    "reversal_of_receipt_id": {
+      "$ref": "common.schema.json#/$defs/uuidv4",
+      "description": "UUID of the receipt being reversed. Issuer MUST match the original receipt's issuer."
+    },
+    "granted_by_receipt_id": {
+      "$ref": "common.schema.json#/$defs/uuidv4",
+      "description": "UUID of a prior authority_granted receipt that authorizes this action. Strict verifiers MUST check the referenced receipt exists, was emitted by this receipt's principal_did, hasn't expired (per its machine_payload.grant_expires_at), and its machine_payload.granted_scope covers this action's category. v0.1 — see spec §4.6 (Authority chain)."
+    }
+  },
+  "allOf": [
+    {
+      "description": "Category 'other' requires machine_payload.action_type_label to be a non-empty string.",
+      "if": {
+        "properties": { "category": { "const": "other" } },
+        "required": ["category"]
+      },
+      "then": {
+        "required": ["machine_payload"],
+        "properties": {
+          "machine_payload": {
+            "type": "object",
+            "required": ["action_type_label"],
+            "properties": {
+              "action_type_label": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Category 'authority_granted' requires machine_payload to declare the grant's scope, the agent receiving it, and an expiration. See spec §4.6.",
+      "if": {
+        "properties": { "category": { "const": "authority_granted" } },
+        "required": ["category"]
+      },
+      "then": {
+        "required": ["machine_payload"],
+        "properties": {
+          "machine_payload": {
+            "type": "object",
+            "required": ["granted_scope", "granted_to_did", "grant_expires_at"],
+            "properties": {
+              "granted_scope": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Action category the grant authorizes (e.g. 'intent_submitted', 'message_sent', or '*' for any)."
+                },
+                "description": "Action categories this grant authorizes. ['*'] means any category."
+              },
+              "granted_to_did": {
+                "$ref": "common.schema.json#/$defs/didKey",
+                "description": "did:key of the agent receiving the authority."
+              },
+              "grant_expires_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "RFC 3339 timestamp after which the grant is invalid. Verifiers MUST reject actions referencing an expired grant."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Category 'authority_revoked' requires machine_payload to reference the receipt of the original grant being revoked.",
+      "if": {
+        "properties": { "category": { "const": "authority_revoked" } },
+        "required": ["category"]
+      },
+      "then": {
+        "required": ["machine_payload"],
+        "properties": {
+          "machine_payload": {
+            "type": "object",
+            "required": ["revokes_receipt_id"],
+            "properties": {
+              "revokes_receipt_id": {
+                "$ref": "common.schema.json#/$defs/uuidv4",
+                "description": "UUID of the original authority_granted receipt being revoked. Issuer MUST match the original grant's principal_did."
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,341 @@
+###############################################################################
+# Orrery — manual Compose org stack (agent-native).
+#
+# Before the first start, copy .env.example to .env and replace both
+# POSTGRES_PASSWORD and ORRERY_KEY_SECRET with fresh, independent values.
+# See docs/INSTALL.md#quick-start-manual for the exact setup and verification.
+# Then: docker compose up     # → org server + Postgres
+#
+# Services:
+#   db     — PostgreSQL 15 + pgvector (schema loaded on first boot)
+#   server — the Orrery org server (FastAPI) — signed receipts + agent surfaces,
+#            talking to Postgres directly via DATABASE_URL (pg_store).
+#
+# No human login (Ed25519 signed requests), no React portal, no GoTrue, and no
+# PostgREST/Supabase data API — an org of accountable agents, not a SaaS app.
+# Org provisioning: name the org via ORG_ID / ORG_NAME in .env.
+###############################################################################
+
+services:
+  db:
+    image: pgvector/pgvector:pg15@sha256:a20a57d7aa5217a6af0a391ccf69f4a8512406d6c14be08132f801468cc3cc62
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orrery}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Read by the 03-app-role hook on FIRST INITIALISATION only. The superuser
+      # above applies migrations; the server connects as the role below.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./infra/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./infra/migrations/0006_app_role.sql:/opt/orrery/0006_app_role.sql
+      - ./infra/03-app-role.sh:/docker-entrypoint-initdb.d/03-app-role.sh
+    healthcheck:
+      # Force TCP (-h 127.0.0.1) so the check passes only on the REAL server, never on
+      # Postgres's socket-only temporary init server during the multi-minute schema load.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-orrery}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+    restart: unless-stopped
+
+  # One-shot readiness gate. Waits (over the network, not the socket-only init server)
+  # until the real server is up AND the schema is loaded, then exits.
+  #
+  # BOUNDED. An unbounded wait turned a stated condition into a silent hang: a
+  # volume initialised under one POSTGRES_PASSWORD, started with another, fails
+  # every probe forever, and `docker compose up` waited on this service with no
+  # timeout and no message. The bound is generous because the FIRST
+  # initialisation genuinely takes minutes (the db healthcheck's start_period is
+  # 180s for the same reason); when it is reached, the probe is run once more
+  # with its error kept, so the log names what was wrong instead of only that
+  # something was.
+  db-ready:
+    image: pgvector/pgvector:pg15@sha256:a20a57d7aa5217a6af0a391ccf69f4a8512406d6c14be08132f801468cc3cc62
+    depends_on:
+      - db
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DB_READY_TIMEOUT_SECONDS: ${DB_READY_TIMEOUT_SECONDS:-300}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "waiting for db to finish initializing… (up to $${DB_READY_TIMEOUT_SECONDS}s)"
+        waited=0
+        until psql -h db -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-orrery}" \
+                   -tAc "select 1 from public.agents limit 1" >/dev/null 2>&1; do
+          if [ "$$waited" -ge "$${DB_READY_TIMEOUT_SECONDS}" ]; then
+            echo "db-ready: gave up after $${waited}s. Last probe said:"
+            psql -h db -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-orrery}" \
+                 -tAc "select 1 from public.agents limit 1" 2>&1 | sed 's/^/  /'
+            echo "db-ready: if that is 'password authentication failed', the db volume was initialised"
+            echo "db-ready: with a different POSTGRES_PASSWORD than .env carries — restore the .env that"
+            echo "db-ready: created it, or drop the volume (./orrery-up down --purge) and start over."
+            exit 1
+          fi
+          sleep 2
+          waited=$$((waited + 2))
+        done
+        echo "db ready (schema loaded)."
+    restart: "no"
+
+  server:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.server
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-unknown}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:-unknown}
+    # Boots regardless of db readiness (serves /health immediately; data calls are
+    # lazy and recover once the db is up).
+    depends_on:
+      db-ready:
+        condition: service_completed_successfully
+    environment:
+      # ── Org identity (the deployer names their org) ──
+      AGENT_ID: ${ORG_ID:-demo-org}
+      AGENT_NAME: ${ORG_NAME:-Demo Org}
+      AGENT_DESCRIPTION: ${ORG_DESCRIPTION:-A self-hosted Orrery org of accountable agents.}
+      PORT: "7000"
+      # C14: this defaults to a relative path (CWD=/app/server), which read_only
+      # makes unwritable. Point it at the persistent volume explicitly.
+      MEMBER_PERSIST_OUTBOX_PATH: /app/server/.org/member_persist_outbox.jsonl
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:7000}
+      # Deployment profile (R7): prod locks CORS to ALLOWED_ORIGINS and
+      # turns off /docs + /openapi.json. dev keeps local ergonomics.
+      ORRERY_PROFILE: ${ORRERY_PROFILE:-prod}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      ORG_RETENTION_SWEEP_ENABLED: ${ORG_RETENTION_SWEEP_ENABLED:-true}
+      ORG_RETENTION_SWEEP_DRY_RUN: ${ORG_RETENTION_SWEEP_DRY_RUN:-false}
+      ORG_ADMIN_TOKEN: ${ORG_ADMIN_TOKEN:-}
+      # ── Data backend: direct Postgres (pg_store) — no PostgREST/Supabase ──
+      # The server connects as the non-superuser application role, never as the
+      # superuser. A superuser can DROP any table, read pg_shadow and COPY FROM
+      # PROGRAM; the server needs SELECT, INSERT, UPDATE and DELETE and issues no
+      # DDL against Postgres. The superuser is still what applies migrations.
+      DATABASE_URL: postgres://${APP_DB_USER:-orrery_app}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB:-orrery}
+      # ── Optional ──
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      # A variable not listed here NEVER REACHES THE CONTAINER, silently — which
+      # already happened to LLM_PROVIDER, LLM_MODEL and LLM_BASE_URL, and is why
+      # docs/CONFIGURATION.md records that failure. These two are security gates
+      # (server/env_flags.py), so a stock install must be able to set them.
+      #
+      # LLM_STRICT ships FALSE: off is the existing behaviour, and the report-only
+      # release is what the flip is read from.
+      LLM_STRICT: ${LLM_STRICT:-false}
+      LLM_AUTODETECT: ${LLM_AUTODETECT:-true}
+      KLAVIYO_LIVE_SENDS: ${KLAVIYO_LIVE_SENDS:-false}
+      KLAVIYO_API_KEY: ${KLAVIYO_API_KEY:-}
+      # Defaults to EMPTY = publish nowhere. Reaching a live registry is an
+      # opt-in the operator performs by setting this, never something a stock
+      # install inherits.
+      #
+      # This default used to be the live NEST URL. The empty-vs-unset fix fixed the EMPTY case by
+      # switching `:-` to `-`, so `REGISTRY_URL=` stays empty — but UNSET still
+      # substituted the live registry, and `orrery-up` never wrote the key, so
+      # every stock install landed in exactly the unset case. That fix was real
+      # and incomplete: it closed the half that was written down and left the
+      # half that was defaulted.
+      #
+      # `${VAR-}` (single dash) is retained deliberately so an explicitly empty
+      # value also stays empty; with `:-` the two cases would diverge again.
+      REGISTRY_URL: ${REGISTRY_URL-}
+      AUTO_REGISTER: ${AUTO_REGISTER:-false}
+      FEDERATION_AUTODISCOVER: ${FEDERATION_AUTODISCOVER:-false}
+      # Federation security is enforced by default: broadcasts must carry a
+      # valid signature and discovery only uses signed, DID-pinned records.
+      # Override to "false" only for a deliberate warn-only migration window —
+      # unsigned federation lets a peer forge cross-org broadcasts and lets a
+      # cheating registry serve tampered endpoints.
+      FEDERATION_ENFORCE_SIGNED_BROADCASTS: ${FEDERATION_ENFORCE_SIGNED_BROADCASTS:-true}
+      FEDERATION_REQUIRE_SIGNED_RECORDS: ${FEDERATION_REQUIRE_SIGNED_RECORDS:-true}
+      # Seals the org signing key AND members' LLM provider keys at rest
+      # (AES-256-GCM) — keep it out of the database's own backups. REQUIRED: the
+      # server refuses to start when it is blank, rather than writing the signing
+      # key in the clear as it did before AUDIT_HARSH C11.
+      ORRERY_KEY_SECRET: ${ORRERY_KEY_SECRET:-}
+      # Set false ONLY to deliberately accept plaintext secrets at rest.
+      ORRERY_REQUIRE_SEALED_SECRETS: ${ORRERY_REQUIRE_SEALED_SECRETS:-true}
+      # Gate /metrics for external scrapers. Unset = open (dev). The
+      # handler honors this, but it only works if compose passes it through.
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
+    # ── C14: container hardening ──────────────────────────────────────────
+    # read_only makes the image layer immutable at runtime, so the ONLY writable
+    # paths are the ones named below. Every write path was located first (they
+    # are listed here) rather than discovered by watching the e2e job die.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      # Python/uvicorn scratch. noexec+nosuid so a writable dir is not a
+      # foothold for executing dropped payloads.
+      - /tmp:mode=1777,noexec,nosuid,size=64m
+    volumes:
+      # Persist runtime state — org config, signed conformance badge, issuer log,
+      # the org's Ed25519 keypair, and the admin token.
+      #
+      # ⚠️ This mount used to point at `.nanda`, the LEGACY dir name. The live
+      # code writes `.org` (chapter_agent._ORG_DATA_DIR) and the admin token
+      # lands in ORG_HOME — so with the old mount, none of that state was on a
+      # volume: the org's SIGNING IDENTITY and admin token were regenerated on
+      # every `--force-recreate`. Pointing the same named volume at `.org`
+      # preserves any existing contents (the files are identical; `.nanda`→`.org`
+      # was a rename, and org_home.resolve_org_dir performs the same migration).
+      - server-data:/app/server/.org
+    ports:
+      # The server binds to loopback by default; external exposure is explicit.
+      - "${SERVER_BIND_HOST:-127.0.0.1}:${SERVER_PORT:-7000}:7000"
+    restart: unless-stopped
+
+  # NOTE: the per-person sovereign agent (community-member) is normally NOT a
+  # compose service — each member runs it on their OWN machine so its identity
+  # stays passphrase-held on a device they control. `docker compose up` is the
+  # ORG. The `agent` profile below (used by ./orrery-up) is the
+  # one-command LOCAL bootstrap: a first agent on the same machine so a fresh
+  # install has a complete, working org + joined member out of the box. Its
+  # identity is still passphrase-held (COMMUNITY_MEMBER_PASSPHRASE, generated
+  # fresh per install by ./orrery-up) and persists in the agent-data volume.
+  agent:
+    profiles: ["agent"]
+    build:
+      context: agent
+      dockerfile: infra/Dockerfile.agent
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      AGENT_ID: ${AGENT_ID:-demo-agent}
+      AGENT_NAME: ${AGENT_NAME:-Demo Agent}
+      AGENT_DESCRIPTION: ${AGENT_DESCRIPTION:-A sovereign Orrery agent.}
+      AGENT_SKILLS: ${AGENT_SKILLS:-general}
+      # In-network org URL: the agent joins at startup (serve.py) and
+      # advertises AGENT_PUBLIC_URL as its member endpoint.
+      CHAPTER_URL: http://server:7000
+      AGENT_PUBLIC_URL: ${AGENT_PUBLIC_URL:-http://agent:8080}
+      PORT: "8080"
+      COMMUNITY_MEMBER_HOME: /data/.community-member
+      COMMUNITY_MEMBER_KEYSTORE: passphrase
+      # Generated fresh per install by ./orrery-up — never shipped. serve.py
+      # fails LOUD at startup if this is empty (no silent throwaway identity).
+      COMMUNITY_MEMBER_PASSPHRASE: ${COMMUNITY_MEMBER_PASSPHRASE:-}
+      # BYOK — OPTIONAL and provider-agnostic (anthropic/openai/xai/groq/local
+      # all first-class). Blank = fully working keyless agent; generative
+      # features simply stay off until a key is added.
+      AGENT_PROVIDER: ${AGENT_PROVIDER:-}
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
+      AGENT_MODEL: ${AGENT_MODEL:-}
+    volumes:
+      - agent-data:/data
+    ports:
+      # Changing server publication does not change the agent API's bind host.
+      - "${AGENT_BIND_HOST:-127.0.0.1}:${AGENT_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  # The A2UI reference renderer, served by the stack so a first run has
+  # something to open rather than four curl URLs.
+  #
+  # ⚠️ IT IS A SERVICE FOR ONE REASON: LIFECYCLE. `./orrery-up` exits after its
+  # drill, so a static server it spawned itself would be reparented to init and
+  # outlive it — and `./orrery-up down` is a separate invocation that never met
+  # that child, leaving it a pidfile (stale after PID reuse) or "kill whatever
+  # holds the port" (kills the operator's own server) as its only ways to stop
+  # it. Compose owns this process, so `down` stops it the same way it stops
+  # every other one, and the installer keeps a teardown it can honestly claim.
+  #
+  # `python3 -m http.server` rather than a web server image, for two reasons.
+  # It is byte-for-byte the command renderer/README.md documents for serving the
+  # directory by hand, so the shipped service and the standalone path cannot
+  # drift into behaving differently. And the image is the SAME python:3.12-slim
+  # digest infra/Dockerfile.server, .index and .smb-host already pin — this adds
+  # a service without adding an image to the supply chain, and there is one
+  # digest to keep current rather than two.
+  #
+  # The page carries its own strict CSP in a `<meta http-equiv>` tag, so the
+  # policy travels with the file and does not depend on this server emitting a
+  # header. Nothing is compiled: the renderer has no build step and must not
+  # grow one — `./renderer` is mounted read-only and served as it sits in the
+  # tree, so an edit to a source file is live on the next reload.
+  #
+  # Its own profile, not `agent`: `docker compose up` stays "just the org", the
+  # end-to-end federation stack does not start a second listener on this port,
+  # and `./orrery-up` opts in by naming both profiles.
+  renderer:
+    profiles: ["ui"]
+    image: python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+    # --directory rather than a working_dir + relative serve, so the served root
+    # is stated where the reader can see it and cannot be moved by a cwd change.
+    command:
+      - python3
+      - -m
+      - http.server
+      - "8600"
+      - --bind
+      - 0.0.0.0
+      - --directory
+      - /srv/renderer
+    # Same hardening as `server`. It serves static files and writes nothing, so
+    # read_only costs it nothing and there is no tmpfs to grant.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ./renderer:/srv/renderer:ro
+    ports:
+      # Loopback by default, like the other two published services.
+      - "${RENDERER_BIND_HOST:-127.0.0.1}:${RENDERER_PORT:-8600}:8600"
+    restart: unless-stopped
+
+  # Scheduled logical backups. OPT-IN — only runs under the "backup"
+  # profile (`docker compose --profile backup up -d`), so a default `up` is
+  # unchanged. Loops infra/backup.sh on an interval, writing timestamped pg_dump
+  # files to the `db-backups` volume (mount it to a host path or offsite store
+  # for real durability). Same pg15 image as `db` so pg_dump versions match.
+  # NOTE: this backs up the DATABASE only. The org signing key is sealed in the
+  # dump with ORRERY_KEY_SECRET when set — back that secret up SEPARATELY, or the
+  # dump cannot be restored to a working identity. See docs/BACKUP_RESTORE.md.
+  db-backup:
+    profiles: ["backup"]
+    image: pgvector/pgvector:pg15@sha256:a20a57d7aa5217a6af0a391ccf69f4a8512406d6c14be08132f801468cc3cc62
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-orrery}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./infra/backup.sh:/usr/local/bin/backup.sh:ro
+      - db-backups:/backups
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "[backup] sidecar up; interval=${BACKUP_INTERVAL_SECONDS:-86400}s dir=/backups"
+        while true; do
+          sh /usr/local/bin/backup.sh || echo "[backup] cycle FAILED (will retry next interval)" >&2
+          sleep "${BACKUP_INTERVAL_SECONDS:-86400}"
+        done
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  server-data:
+  agent-data:
+  db-backups:

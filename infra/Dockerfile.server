@@ -1,0 +1,66 @@
+# Orrery org server image. Build context is the REPO ROOT (the server's flat modules
+# plus the shared protocol artifacts conformance/ + schema/ at the root).
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# requirements.lock is the fully-resolved runtime set — bit-for-bit
+# reproducible installs; requirements.txt/constraints.txt keep the intent and
+# the sm-* supply-chain pins (R3) that regenerate it.
+COPY server/requirements.lock /app/server/requirements.lock
+RUN pip install --no-cache-dir -r /app/server/requirements.lock
+
+# Application code + shared protocol artifacts (server resolves these from the repo root).
+COPY server/ /app/server/
+COPY conformance/ /app/conformance/
+COPY schema/ /app/schema/
+# Signing-vector corpus: conformance_boot.py pins the boot badge's
+# suite_digest to it and runs the self-checks against it.
+COPY vectors/ /app/vectors/
+# Schema migrations: federation_feed.py runs 0005 as a boot-time ensure and reads
+# it from HERE rather than carrying its own copy of the DDL, so the statement that
+# creates the table at boot is the same file an operator applies by hand. That
+# means the migrations must be IN the image — they were not, and the server
+# container failed its healthcheck on the first CI run of the feed-restart conformance work because the
+# ensure could not read its own DDL. Asserted by server/tests/test_federation_feed.py
+# so the next module that reads a repo file at boot does not rediscover this.
+COPY infra/migrations/ /app/infra/migrations/
+
+# C14: run as a non-root user. Created before the writable dirs so they can be
+# owned by it — a read_only container still needs SOME writable state, and that
+# state must belong to the unprivileged uid, not root.
+RUN groupadd --gid 10001 orrery \
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin orrery \
+  && mkdir -p /app/server/.org \
+  && chown -R orrery:orrery /app/server/.org
+
+WORKDIR /app/server
+ENV PYTHONPATH=/app/server:/app \
+    PORT=7000 \
+    ORG_HOME=/app/server/.org
+
+# Build provenance. Stamped by the build — CI/compose/local pass
+# --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) (+ branch/timestamp) so
+# /version AND /health report the exact commit running, defeating the silent
+# stale-deploy failure mode from the PR postmortem. Declared late so a new
+# commit doesn't bust the pip-install layer cache. Defaults to "unknown" for an
+# un-stamped local build.
+ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_TIMESTAMP=unknown
+ENV GIT_COMMIT=$GIT_COMMIT \
+    GIT_BRANCH=$GIT_BRANCH \
+    BUILD_TIMESTAMP=$BUILD_TIMESTAMP
+
+EXPOSE 7000
+HEALTHCHECK --interval=15s --timeout=5s --retries=20 \
+  CMD curl -fsS "http://localhost:${PORT:-7000}/health" || exit 1
+
+# chapter_agent.py runs uvicorn under __main__ (host 0.0.0.0, $PORT).
+USER orrery
+
+CMD ["python", "chapter_agent.py"]

@@ -47,24 +47,24 @@ import sys
 # ---------------------------------------------------------------------------
 PLANETS = [
     # name        a_AU     size  core_color   glow_color   phase  atmo
-    ("Mercury",   0.387,   4.0,  "#9c9088",   "#cdc3b8",     0,   None),
-    ("Venus",     0.723,   7.0,  "#e6c479",   "#f7 ", 0, None),  # placeholder fixed below
-    ("Earth",     1.000,   7.6,  "#3f86d6",   "#9fd0ff",    95,   "#7ab8ff"),
-    ("Mars",      1.524,   5.2,  "#d05a36",   "#f2906f",   150,   None),
-    ("Jupiter",   5.203,  16.0,  "#d3a06a",   "#eecfa1",   210,   None),
-    ("Saturn",    9.537,  13.5,  "#e0c886",   "#f4e6bd",   285,   None),
-    ("Uranus",   19.191,  10.0,  "#9fdce0",   "#cdf3f5",   330,   "#bfeef0"),
-    ("Neptune",  30.070,  10.0,  "#4863d4",   "#90a6f6",    20,   "#7d93f0"),
+    ("Mercury", 0.387, 4.0, "#9c9088", "#cdc3b8", 0, None),
+    ("Venus", 0.723, 7.0, "#e6c479", "#f7 ", 0, None),  # placeholder fixed below
+    ("Earth", 1.000, 7.6, "#3f86d6", "#9fd0ff", 95, "#7ab8ff"),
+    ("Mars", 1.524, 5.2, "#d05a36", "#f2906f", 150, None),
+    ("Jupiter", 5.203, 16.0, "#d3a06a", "#eecfa1", 210, None),
+    ("Saturn", 9.537, 13.5, "#e0c886", "#f4e6bd", 285, None),
+    ("Uranus", 19.191, 10.0, "#9fdce0", "#cdf3f5", 330, "#bfeef0"),
+    ("Neptune", 30.070, 10.0, "#4863d4", "#90a6f6", 20, "#7d93f0"),
 ]
 # fix the placeholder cleanly (kept the table readable above)
 PLANETS[1] = ("Venus", 0.723, 7.0, "#e6c479", "#f6e4ad", 40, "#f0d99a")
 
 # Canvas / mapping ----------------------------------------------------------
-SIZE = 920                      # square viewBox
-CX = CY = SIZE / 2             # centre (the Sun, the "org")
-R0 = 56                         # radius of innermost mapping offset (px)
-K = 63.5                        # sqrt compression gain (px per sqrt(AU))
-SUN_R = 25                      # Sun display radius
+SIZE = 920  # square viewBox
+CX = CY = SIZE / 2  # centre (the Sun, the "org")
+R0 = 56  # radius of innermost mapping offset (px)
+K = 63.5  # sqrt compression gain (px per sqrt(AU))
+SUN_R = 25  # Sun display radius
 
 # Time scaling: innermost orbit takes BASE_DUR seconds; everything else follows
 # Kepler from its displayed radius.
@@ -96,7 +96,7 @@ def starfield(n: int = 150, seed: int = 7) -> str:
         tint = rng.choice(["#dfe8ff", "#dfe8ff", "#fff1d8", "#d8ecff"])
         out.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.2f}" fill="{tint}" opacity="{o:.2f}">'
-            f'<animate attributeName="opacity" values="{o:.2f};{o*0.2:.2f};{o:.2f}" '
+            f'<animate attributeName="opacity" values="{o:.2f};{o * 0.2:.2f};{o:.2f}" '
             f'dur="{tw:.1f}s" begin="-{bo:.1f}s" repeatCount="indefinite"/></circle>'
         )
     # a handful of brighter 4-point glint stars
@@ -126,14 +126,14 @@ def saturn_ring(px, py, size) -> tuple:
     # back half (drawn before planet), front half (after) -> depth
     back = (
         f"{g_open}"
-        f'<path d="M{px-rx:.1f} {py:.1f} A {rx:.1f} {ry:.1f} 0 0 1 {px+rx:.1f} {py:.1f}" '
+        f'<path d="M{px - rx:.1f} {py:.1f} A {rx:.1f} {ry:.1f} 0 0 1 {px + rx:.1f} {py:.1f}" '
         f'fill="none" stroke="url(#ring)" stroke-width="5.2" opacity="0.9"/></g>'
     )
     front = (
         f"{g_open}"
-        f'<path d="M{px-rx:.1f} {py:.1f} A {rx:.1f} {ry:.1f} 0 0 0 {px+rx:.1f} {py:.1f}" '
+        f'<path d="M{px - rx:.1f} {py:.1f} A {rx:.1f} {ry:.1f} 0 0 0 {px + rx:.1f} {py:.1f}" '
         f'fill="none" stroke="url(#ring)" stroke-width="5.2" opacity="0.95"/>'
-        f'<path d="M{px-rx*0.66:.1f} {py:.1f} A {rx*0.66:.1f} {ry*0.66:.1f} 0 0 0 {px+rx*0.66:.1f} {py:.1f}" '
+        f'<path d="M{px - rx * 0.66:.1f} {py:.1f} A {rx * 0.66:.1f} {ry * 0.66:.1f} 0 0 0 {px + rx * 0.66:.1f} {py:.1f}" '
         f'fill="none" stroke="#b89a5a" stroke-width="1.3" opacity="0.5"/></g>'
     )
     return back, front
@@ -155,23 +155,23 @@ def planet_group(name, a_au, size, core, glow, phase, atmo, r_px, dur) -> str:
             f'<g><animateTransform attributeName="transform" type="rotate" '
             f'from="0 {px:.1f} {py:.1f}" to="360 {px:.1f} {py:.1f}" '
             f'dur="{moon_dur:.1f}s" repeatCount="indefinite"/>'
-            f'<circle cx="{px+moon_r:.1f}" cy="{py:.1f}" r="2.0" fill="#cfd3da"/></g>'
+            f'<circle cx="{px + moon_r:.1f}" cy="{py:.1f}" r="2.0" fill="#cfd3da"/></g>'
         )
 
     atmo_halo = ""
     if atmo:
         atmo_halo = (
-            f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{size*1.16:.1f}" fill="none" '
+            f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{size * 1.16:.1f}" fill="none" '
             f'stroke="{atmo}" stroke-width="2.1" opacity="0.35"/>'
         )
 
     # base body, sun-lit terminator, and a small specular glint toward the Sun (left)
     spec_x, spec_y, spec_r = px - size * 0.34, py - size * 0.30, size * 0.20
     body = (
-        f'{atmo_halo}'
+        f"{atmo_halo}"
         f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{size:.1f}" fill="url(#{grad})"/>'
         f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{size:.1f}" fill="url(#shade)"/>'
-        f'<ellipse cx="{spec_x:.1f}" cy="{spec_y:.1f}" rx="{spec_r:.1f}" ry="{spec_r*0.75:.1f}" '
+        f'<ellipse cx="{spec_x:.1f}" cy="{spec_y:.1f}" rx="{spec_r:.1f}" ry="{spec_r * 0.75:.1f}" '
         f'fill="#ffffff" opacity="0.35"/>'
     )
 
@@ -205,7 +205,9 @@ def build() -> str:
     for name, a_au, size, core, glow, phase, atmo in PLANETS:
         r_px = orbit_radius(a_au)
         dur = kepler_duration(r_px, r_inner)
-        groups.append(planet_group(name, a_au, size, core, glow, phase, atmo, r_px, dur))
+        groups.append(
+            planet_group(name, a_au, size, core, glow, phase, atmo, r_px, dur)
+        )
     bodies = "\n".join(groups)
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {SIZE} {SIZE}"
@@ -255,8 +257,8 @@ def build() -> str:
   {starfield()}
 
   <!-- corona + star -->
-  <circle cx="{CX}" cy="{CY}" r="{SUN_R*3.2:.0f}" fill="url(#corona)">
-    <animate attributeName="r" values="{SUN_R*3.0:.0f};{SUN_R*3.5:.0f};{SUN_R*3.0:.0f}"
+  <circle cx="{CX}" cy="{CY}" r="{SUN_R * 3.2:.0f}" fill="url(#corona)">
+    <animate attributeName="r" values="{SUN_R * 3.0:.0f};{SUN_R * 3.5:.0f};{SUN_R * 3.0:.0f}"
       dur="6s" repeatCount="indefinite"/>
     <animate attributeName="opacity" values="0.85;1;0.85" dur="6s" repeatCount="indefinite"/>
   </circle>

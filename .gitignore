@@ -1,4 +1,101 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Node
+node_modules/
+
+# Local state & secrets
 .env
+# An operator's own capability grants name their paths and hosts. The
+# tracked file is grants.policy.example, which grants nothing.
+grants.policy
+*.db
+# …but Dockerfile.db is a committed deploy artifact, not a SQLite file.
+!infra/Dockerfile.db
+*.sqlite
+# Deployment/runtime state: signed conformance badges + issuer logs are
+# generated per-deployment, never committed.
+.nanda/
+.org/
+# Runtime-generated server secrets (admin bearer token, identity files).
+.chapter-admin-token
+.org-admin-token
+*.admin-token
+identity.json
+
+# Editor / OS
 .DS_Store
+.idea/
+.vscode/
+
+# Internal development process — never ship these
+docs/superpowers/
+*.log
+CHANGELOG.md
+**/CHANGELOG.md
+# …but the repo's own root CHANGELOG IS tracked.
+!/CHANGELOG.md
+.claude/
+.claude-*/
+*.plan.md
+**/CODEMAPS/
+AGENTS.md
+
+# Conformance test vectors are a generated artifact (deterministic) — the
+# generators run in CI and on demand; never commit the output. Ignore the
+# CONTENTS (not the dir itself, so the signing re-include below works).
+/vectors/*
+# …EXCEPT the client signing-conformance corpus, which is committed STATIC
+# reference data (a frozen oracle that catches spec_reference drift), not
+# generated.
+!/vectors/signing/
+# …and the peer-rotation corpus, same category: a byte-for-byte MIRROR of the
+# umbrella's canonical vectors/rotation/v06/, committed so Orrery's §8.5
+# conformance is checked against the spec's oracle rather than against fixtures
+# it wrote for itself. Static reference data, not generated — the generator
+# lives in the umbrella. See vectors/rotation/v06/PROVENANCE.md.
+!/vectors/rotation/
+
+# Dev/internal docs — kept local, not published to GitHub
+server/docs/RELEASING.md
+agent/docs/RELEASING.md
+server/docs/architecture.md
+server/docs/architecture/lean-org.md
+server/docs/protocol.md
+server/docs/EXTENDING.md
+server/docs/ADMIN.md
+agent/docs/HARDWARE_KEYSTORE.md
+conformance/client/adapters/CLI_ADAPTER.md
+infra/railway-deploy.md
+docs/SCOPE.md
+docs/VOCABULARY.md
+
+# Coverage artifacts (R1)
+.coverage
+coverage.json
+
+# durable member-persist outbox (local runtime artifact, never committed)
+member_persist_outbox.jsonl
+server/member_persist_outbox.jsonl
+
+# Never commit built wheels to this repo (guarded by test_no_committed_wheels.py).
+*.whl
+
+# Deepwork state files (workflow-only, never committed)
+.slim/deepwork/
+
+# Internal working docs — never commit (see internal-vs-external-voice).
+*.tmp.md
+
+# scripts/demo_two_agents.sh — its evidence directory and the venv it builds when no runtime is installed
+demo-evidence/
+.orrery-demo-venv/

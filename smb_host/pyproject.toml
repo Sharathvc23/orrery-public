@@ -1,0 +1,53 @@
+[project]
+name = "orrery-smb-host"
+version = "0.1.0"
+description = "Multi-tenant no-infra host that provisions isolated SMB agents (mint identity + serve card and signed booking receipts). Index registration is out of scope."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sharath Chandra", email = "sharath@komputix.com" }]
+keywords = ["agents", "nanda", "smb", "multi-tenant", "discovery", "did:key"]
+# A small FastAPI service run from `infra/Dockerfile.smb-host`, or directly with
+# uvicorn from this directory. See smb_host/README.md for both commands.
+#
+# THIS PACKAGE IS NOT INSTALLABLE AND IS NOT MEANT TO BE. It is two flat modules
+# with no build backend, so `pip install ./smb_host` fails on setuptools'
+# flat-layout discovery ("Multiple top-level modules discovered"). This file
+# exists for dependency declaration, lint config and test config — not to build a
+# distribution. It said "deployed from its own image" while no image for it
+# existed anywhere in the repository, which sent a reader looking for a file that
+# was not there; the image now exists and this comment says what is true.
+#
+# It depends on the installed `community_member` package (orrery-agent) for
+# per-tenant isolation (AgentContext, B2a) and the canonical agent-card builder.
+dependencies = [
+    "orrery-agent",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.24.0", "ruff>=0.15", "mypy>=1.8"]
+
+[project.urls]
+Homepage = "https://github.com/Sharathvc23/orrery"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+# Same correctness gate as the rest of the repo (E/F/I/UP).
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+# mypy: strict — the host is small and fully typed. community_member has no
+# py.typed marker, so its imports resolve as untyped (Any) with the flag below;
+# our own surface stays strictly typed.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+files = ["main.py"]
