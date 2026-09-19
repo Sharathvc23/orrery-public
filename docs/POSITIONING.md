@@ -116,7 +116,7 @@ that boots the full stack and drives the advertised surfaces on every PR.
 
 One Critical finding from that third audit still has an open residual in code:
 C4 has no row-level-security policies. Its former prerequisite is fixed —
-[PR &#35;556](https://github.com/Sharathvc23/orrery/pull/556), landed 2026-08-15,
+a pre-release change, landed 2026-08-15,
 changed the Compose default to `orrery_app`, a non-superuser `NOBYPASSRLS`
 runtime role. Operators can override `APP_DB_USER` or `DATABASE_URL`; the role
 also retains broad CRUD, sequence, and function grants. The default reduces

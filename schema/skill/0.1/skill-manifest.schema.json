@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Sharathvc23/orrery/schema/skill/0.1/skill-manifest.schema.json",
+  "$id": "https://github.com/Sharathvc23/orrery-public/schema/skill/0.1/skill-manifest.schema.json",
   "title": "NANDA Skill Manifest v0.1",
   "description": "Metadata for a NANDA chapter skill. A NANDA skill is a SIGNED, EXECUTABLE capability package: the registry binds this manifest to package bytes via a content sha256 and an Ed25519 signature (carried out-of-band at publish time, not in this manifest), and the member runtime sandboxes execution by `capabilities`. The fields beyond name/version/capabilities are an additive, declarative superset that makes the same skill expressible in the open Agent-Skills ecosystem (generic agents / Claude Agent Skills / MCP / NANDA AgentFacts) — they enrich discovery and safety review but never relax the signing or capability gate. All of them are optional, so older manifests validate unchanged.",
   "type": "object",

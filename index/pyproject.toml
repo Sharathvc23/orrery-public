@@ -23,7 +23,7 @@ dependencies = [
 dev = ["pytest>=8.0", "httpx>=0.24.0", "ruff>=0.15"]
 
 [project.urls]
-Homepage = "https://github.com/Sharathvc23/orrery"
+Homepage = "https://github.com/Sharathvc23/orrery-public"
 
 [tool.pytest.ini_options]
 testpaths = ["."]

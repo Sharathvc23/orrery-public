@@ -3,7 +3,7 @@
 **Policy scope only. No RLS implementation.** Per-table RLS across a hundred
 tables is a schema-wide change with a real chance of silently breaking
 production reads. The first prerequisite identified here landed separately:
-[PR &#35;556](https://github.com/Sharathvc23/orrery/pull/556), landed 2026-08-15,
+a pre-release change, landed 2026-08-15,
 changed the Compose default for the server database connection to a
 non-superuser runtime role. This document preserves the corrections to the
 original finding and records what remains before the database enforces row
@@ -127,7 +127,7 @@ currently carries the whole load. It is worth having, and it is worth having in
 this order:
 
 1. **Complete in the Compose default — create a non-superuser runtime role and
-   default `DATABASE_URL` to it.** [PR &#35;556](https://github.com/Sharathvc23/orrery/pull/556)
+   default `DATABASE_URL` to it.** A pre-release change
    landed this on 2026-08-15. `0006_app_role.sql` gives the role broad CRUD,
    sequence, and function grants while withholding superuser, `BYPASSRLS`,
    schema `CREATE`, and object ownership. This reduces cluster and DDL
@@ -149,7 +149,7 @@ request-serving role.
 C4 is real, but it is mis-stated in three ways: the cited mechanism
 (`row_security = off`) is inert dump boilerplate; the one table cited as
 protected is not; and the scale is 111 tables, not 60+. The non-superuser role
-and Compose default landed in [PR &#35;556](https://github.com/Sharathvc23/orrery/pull/556)
+and Compose default landed in a pre-release change
 on 2026-08-15. The remaining actionable finding is:
 
 > The application role has row-wide DML grants, no row-level-security policies

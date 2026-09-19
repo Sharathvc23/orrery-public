@@ -2,7 +2,7 @@
 ### Orrery (agent runtime) · host39 (card host + registrar) · api.nandaindex.org (the one index)
 
 Engineering-ready. Grounded in **current code**, traced 2026-07-25:
-- **Orrery `smb_host`** — `Sharathvc23/orrery` `main` (current). `/provision` returns `{tenant_id, endpoint, did, recovery_phrase}`; serves the card at `/t/<tenant>/.well-known/agent.json` and booking at `/t/<tenant>/book`. **Makes no index calls** (by design — one index, not ours).
+- **Orrery `smb_host`** — `Sharathvc23/orrery-public` `main` (current). `/provision` returns `{tenant_id, endpoint, did, recovery_phrase}`; serves the card at `/t/<tenant>/.well-known/agent.json` and booking at `/t/<tenant>/book`. **Makes no index calls** (by design — one index, not ours).
 - **host39** — `projnanda/host39` `origin/main` `3522ed3`. Account `POST /auth/register` (JWT); card `POST /cards` (JWT, `runtime_url` **optional/nullable**); serves `/:domain/:slug.json` + `/personal/:handle/:slug.json` as `application/a2a-agent-card+json`; URN `urn:ai:{domain|email}:…:agent:<slug>`. **No index client, no did:key/signing, JWT-only (no machine auth), domain ownership unverified.**
 - **api.nandaindex.org** — `nanda-index-v2` `origin/main` `5b8b0d8`, live v2.0.0. `POST /api/v1/orgs` (JWT) inserts `status=pending`. **Activation: DNS-TXT for domain orgs (admin); email-link for PERSONAL (no-domain) orgs → `active`.** No host-vouched activation, no machine/API-key, no bulk. Resolve: `GET /api/v1/resolve?locator=<urn>` → `{index_record.registry_url}` → caller fetches the card.
 

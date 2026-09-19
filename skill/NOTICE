@@ -18,7 +18,7 @@ Relationship to the protocol
 
 This skill is one reference runtime of the org protocol — the
 reduced-trust client surface. It is part of Orrery
-(https://github.com/Sharathvc23/orrery).
+(https://github.com/Sharathvc23/orrery-public).
 
 How to attribute downstream
 ---------------------------
@@ -30,6 +30,6 @@ the existing ones without removing the original attribution.
 Contact
 -------
 
-- Orrery: https://github.com/Sharathvc23/orrery
+- Orrery: https://github.com/Sharathvc23/orrery-public
 - Stellarminds.ai: https://labs.stellarminds.ai
 - Skill page on ClawHub: search for `orrery-org`.

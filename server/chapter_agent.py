@@ -8824,7 +8824,7 @@ async def root_landing() -> dict:
         "agent_id": AGENT_ID,
         "slug": CHAPTER_SLUG,
         "kind": "nanda-chapter",
-        "spec": "https://github.com/Sharathvc23/orrery",
+        "spec": "https://github.com/Sharathvc23/orrery-public",
         "endpoints": {
             "health": "/health",
             "ready": "/ready",
