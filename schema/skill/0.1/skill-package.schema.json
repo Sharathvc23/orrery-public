@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Sharathvc23/orrery/schema/skill/0.1/skill-package.schema.json",
+  "$id": "https://github.com/Sharathvc23/orrery-public/schema/skill/0.1/skill-package.schema.json",
   "title": "NANDA Skill Package (.nandaskill) v0.1",
   "description": "A downloadable, portable, signed skill BUNDLE for the NANDA chapter skill marketplace. A `.nandaskill` file is a ZIP archive with exactly three members: `manifest.json`, `content.bin`, and `signature.json`. It is ADDITIVE over the manifest+content-reference publish path — it reuses the same Ed25519 publisher signature (a detached signature over `content_sha256`, the hex sha256 of the canonical content), so a skill published via /api/skills/publish packs and re-verifies with its stored signature UNCHANGED. This document describes the two JSON members and the archive layout; the archive itself is a standard ZIP, not JSON, so this schema is descriptive of the members plus the layout contract.",
   "type": "object",

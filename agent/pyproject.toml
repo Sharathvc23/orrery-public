@@ -72,7 +72,7 @@ dev = [
 community-member = "community_member.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Sharathvc23/orrery"
+Homepage = "https://github.com/Sharathvc23/orrery-public"
 
 # Quality gate — mirrors the sm-* family contract (ruff + mypy), with
 # line-length 120 to match this app's existing style (the sm-* libs use 100).

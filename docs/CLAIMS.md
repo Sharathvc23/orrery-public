@@ -104,7 +104,7 @@ preceded by 2026-08-01 @ `0921851` and 2026-07-15):
   as incorrect or overstated. Its 20 Medium and 15 Low findings are not
   dispositioned and should be read as open. One Critical still has an open
   residual in code: C4 has no row-level-security policies. Its former blocker is
-  fixed: [PR &#35;556](https://github.com/Sharathvc23/orrery/pull/556), landed
+  fixed: a pre-release change, landed
   2026-08-15, changed the Compose default to `orrery_app`, which
   `infra/migrations/0006_app_role.sql` creates with `NOSUPERUSER` and
   `NOBYPASSRLS`. Operators can override `APP_DB_USER` or `DATABASE_URL`, and the

@@ -47,7 +47,7 @@ has such a disposition.
 
 ### C4 status update — 2026-08-15
 
-[PR &#35;556](https://github.com/Sharathvc23/orrery/pull/556) landed on 2026-08-15,
+A pre-release change landed on 2026-08-15,
 one day after the close-out above. It added `orrery_app`, a non-superuser
 `NOBYPASSRLS` runtime role, and changed the Compose default for the server's
 database connection to that role. `APP_DB_USER` and `DATABASE_URL` remain
@@ -138,7 +138,7 @@ resolved one.
   The finding does not name the actual blocker: the application connects as `postgres`, a superuser, and `infra/init.sql` contains **zero** `CREATE ROLE` and **zero** `GRANT`. PostgreSQL exempts superusers and `BYPASSRLS` roles from every policy unconditionally. So RLS here is not merely weak — it is **inert by construction**, and writing per-table policies tomorrow would produce a large maintenance surface, no security change, and a false sense of coverage. The prerequisite is an application role, not policies.
   Status: open. No code has landed. `docs/audit/C4_RLS_SCOPE.md` records the scope, the corrections above, and the sequencing — create a non-superuser application role first (independently valuable: it removes the "SQL injection anywhere means superuser on the cluster" ceiling even if no policy is ever written), then make one table genuinely enforce, then the `SET LOCAL` identity plumbing, then widen. Policies written before the role would be untested and indistinguishable from working.
 
-  **Later status update — 2026-08-15.** [PR &#35;556](https://github.com/Sharathvc23/orrery/pull/556)
+  **Later status update — 2026-08-15.** A pre-release change
   landed after this disposition. It added the non-superuser `NOBYPASSRLS`
   `orrery_app` role and made it the Compose default for the server database
   connection; operators can still override `APP_DB_USER` or `DATABASE_URL`.

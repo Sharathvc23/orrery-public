@@ -16,7 +16,7 @@ dependencies = ["httpx", "base58", "cryptography"]
 dev = ["pytest"]
 
 [project.urls]
-Homepage = "https://github.com/Sharathvc23/orrery"
+Homepage = "https://github.com/Sharathvc23/orrery-public"
 
 [tool.pytest.ini_options]
 # helpers/ is a flat module dir (helpers import each other as `from sign_request import ...`),

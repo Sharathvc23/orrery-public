@@ -12,8 +12,8 @@ the URL of an org you operate or trust.
 ## Install the agent SDK
 
 ```bash
-git clone https://github.com/Sharathvc23/orrery.git
-cd orrery/agent/
+git clone https://github.com/Sharathvc23/orrery-public.git
+cd orrery-public/agent/
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 ```
@@ -135,7 +135,7 @@ signed request end-to-end. From here:
 | `Org rejected the signed intent` | Signature verification failed | Almost always a clock-skew issue (org requires ±300s); check `date` matches NTP |
 | `Profile not yet available after retries` | Org caches surfaces and may take longer than the demo's retry budget under load | Try the printed `curl` URL directly; usually resolves within 5-10s |
 
-For anything else, [file an issue](https://github.com/Sharathvc23/orrery/issues).
+For anything else, [file an issue](https://github.com/Sharathvc23/orrery-public/issues).
 
 ---
 
