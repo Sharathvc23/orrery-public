@@ -450,6 +450,7 @@ orrery/
 - [CONTRIBUTING.md](CONTRIBUTING.md) — the workflow, the gates, and how a guard is proven.
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability, and what a report should contain.
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [PRIVACY.md](PRIVACY.md) · [CHANGELOG.md](CHANGELOG.md)
+- Contributors: [James Carnley](https://github.com/JamesCarnley) · [Harsh Suthar](https://github.com/10234567Z)
 
 ## The animation
 
