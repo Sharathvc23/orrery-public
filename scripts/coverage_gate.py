@@ -74,6 +74,12 @@ FLOORS: dict[str, dict[str, float]] = {
         # policy above.
         "community_member/dat.py": 98.0,
         "community_member/delegated_call.py": 79.0,
+        # The authority audit. Its verdict is the verifier's, so an uncovered
+        # branch here is not a branch that wrongly authorises anything — it is a
+        # branch that misreports WHY authority was refused, which is what an
+        # operator acts on. Measured 96.1% when it landed, floored 2 points
+        # under per the ratchet policy above.
+        "community_member/authority_audit.py": 94.0,
     },
 }
 
