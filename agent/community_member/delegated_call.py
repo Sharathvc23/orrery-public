@@ -24,11 +24,19 @@ What the authority check establishes, exactly:
   vendored verifier reports a window failure as "outside validity window";
   this module says which side (expired at / not valid until), because "your
   authority expired at 09:00" and "your authority starts at 09:00" are
-  different instructions to the operator.
+  different instructions to the operator;
+* no hop of the grant's chain has been **revoked**. The verb reads the
+  member's own ``DatStore`` for the revocation set and the ancestor pool
+  rather than taking them as arguments, because an argument a caller may omit
+  defaults to "nothing is revoked" — which is how revocation came to be
+  accepted everywhere and enforced nowhere.
 
 It does NOT establish that the grantor is the agent's real principal (that is
 the owner binding's job, ``owner.py``), nor anything about the counterparty's
-authority to act — the counterparty runs its own gate.
+authority to act — the counterparty runs its own gate. Nor does it **discover**
+revocations: the set is whatever the operator recorded locally
+(``community-member dat revoke``), so this is local enforcement of a decision
+made elsewhere, not a revocation protocol.
 
 Every verdict, approve or refuse, is recorded before anything is sent. A
 refusal leaves a ledger row and an envelope whose outcome is ``denied``, and
@@ -52,7 +60,7 @@ from typing import Any
 from .arp import AgencyLog, DuplicateActionError, did_from_private_key
 from .config import Config
 from .consent import aae_emit, gate, ledger
-from .dat import verify_counterparty_dat
+from .dat import DatStore, verify_counterparty_dat
 
 __all__ = [
     "EXIT_DUPLICATE",
@@ -113,8 +121,32 @@ class AuthorityVerdict:
     grant_id: str | None
 
 
-def check_authority(dat: dict[str, Any], *, self_did: str, tool: str, now: str | None = None) -> AuthorityVerdict:
-    """Decide whether ``dat`` authorises THIS agent to call ``tool`` now."""
+def check_authority(
+    dat: dict[str, Any],
+    *,
+    self_did: str,
+    tool: str,
+    now: str | None = None,
+    revocations: set[str] | None = None,
+    dats_by_id: dict[str, dict[str, Any]] | None = None,
+) -> AuthorityVerdict:
+    """Decide whether ``dat`` authorises THIS agent to call ``tool`` now.
+
+    ``revocations`` is the set of withdrawn grant ids — typically
+    ``DatStore.revoked()``. It is checked at **every hop** of the chain, not just
+    the leaf, so withdrawing an ancestor grant withdraws everything delegated
+    beneath it.
+
+    Passing it is what makes revocation real here. ``verify_dat_chain`` has
+    always honoured a revocation set, and this function has always been able to
+    return ``revoked`` — but it never supplied one, so the set was empty and no
+    grant was ever treated as withdrawn. The surface read as though revocation
+    worked from both ends while nothing carried it between them.
+
+    ``dats_by_id`` supplies ancestor grants for a sub-delegated DAT. Without it a
+    chained grant cannot be walked to its root, and an ancestor revoked upstream
+    is invisible.
+    """
     grant_id = dat.get("grant_id") if isinstance(dat, dict) else None
     if not isinstance(dat, dict) or not isinstance(grant_id, str):
         return AuthorityVerdict(False, "no_grant", "no grant was presented (not a DAT: no grant_id)", None)
@@ -125,7 +157,13 @@ def check_authority(dat: dict[str, Any], *, self_did: str, tool: str, now: str |
         detail = f"grant {grant_id} is self-granted: grantor is this agent's own key"
         return AuthorityVerdict(False, "grantor", detail, grant_id)
     now = now or _now_iso()
-    result = verify_counterparty_dat(dat, now=now, category=action_name(tool))
+    result = verify_counterparty_dat(
+        dat,
+        now=now,
+        category=action_name(tool),
+        revocations=revocations,
+        dats_by_id=dats_by_id,
+    )
     if result.ok:
         return AuthorityVerdict(True, "accepted", f"grant {grant_id} authorises {action_name(tool)}", grant_id)
     if result.stage == "window":
@@ -300,7 +338,23 @@ def call_under_authority(
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Authority, then the verdict on record — before anything touches the wire.
-    verdict = check_authority(dat, self_did=self_did, tool=tool, now=now)
+    #
+    # The revocation set and the ancestor pool come from the member's own store
+    # rather than from the caller. A parameter the caller may omit is a parameter
+    # that defaults to "nothing is revoked", and that default is what made
+    # revocation unenforced here: every layer accepted `revocations`, every layer
+    # let it default to None, and None means allow. Reading the store makes the
+    # verb enforce a withdrawal the operator recorded, instead of enforcing one
+    # only when someone remembers to hand it over.
+    store = DatStore(home=config.home)
+    verdict = check_authority(
+        dat,
+        self_did=self_did,
+        tool=tool,
+        now=now,
+        revocations=store.revoked(),
+        dats_by_id=store.pool(),
+    )
     event_sha, envelope = _record_verdict(
         config, self_did=self_did, peer_url=peer_url, tool=tool, verdict=verdict, task_id=task_id
     )

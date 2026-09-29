@@ -13,6 +13,9 @@ What each test pins:
     self-granted DAT → refused BEFORE anything is sent (the peer's counter
     stays at zero), and the refusal is a signed ``denied`` envelope;
   * an expired grant → the refusal says ``expired`` and names the instant;
+  * a **revoked** grant, or one whose ancestor was revoked → refused before the
+    wire, with the revocation read from the member's own store rather than
+    handed in by the caller;
   * the same ``task_id`` twice → refused as a duplicate, sent once;
   * the peer's identity in the receipt is the card's, not the grant's.
 """
@@ -32,12 +35,14 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from community_member import a2a_auth, delegated_call
+from community_member._dat import build_dat
 from community_member.a2a_card import build_agent_card
 from community_member.a2a_rpc import A2ARPCHandler
 from community_member.arp import did_from_private_key
 from community_member.config import Config
 from community_member.consent import aae_emit, ledger
 from community_member.cosign import make_cosigner
+from community_member.dat import DatStore
 from community_member.task_store import TaskStore
 
 
@@ -317,3 +322,109 @@ def test_mint_grant_names_exactly_one_action_and_keeps_the_phrase_out_of_the_dat
     assert again["grantor_did"] == dat["grantor_did"]
     with pytest.raises(ValueError, match="RFC 3339"):
         delegated_call.mint_grant(grantee_did=_did(alice), tool="save_note", not_after="tomorrow")
+
+
+# ── revocation: enforced by the verb, not merely enforceable ──────────────
+#
+# ⚠️ WHY THESE ARE HERE AND NOT IN test_revocation_is_honoured.py. That file
+# drives `check_authority` directly and hands it a revocation set, which proves
+# the check can enforce a withdrawal. It cannot prove that anything ever hands
+# one over — and for a long time nothing did: every layer accepted
+# `revocations`, every layer let it default to None, and None means allow. The
+# tests below drive the real verb with no revocation argument at all, so the
+# only way they can pass is if `call_under_authority` reads the member's store
+# itself. `peer.executed == []` is the assertion that matters: it is the
+# difference between "the call was refused" and "the call did not happen".
+
+
+def _store(config: Config) -> DatStore:
+    """The same store the verb opens — a different path here would test nothing."""
+    return DatStore(home=config.home)
+
+
+def test_a_revoked_grant_never_reaches_the_peer(alice, peer, tmp_path):
+    dat = _grant(alice)
+    _store(alice).revoke(dat["grant_id"], reason="key rotated")
+
+    report = _call(alice, peer, dat, tmp_path / "e")
+
+    assert report.outcome == "refused", report
+    assert report.verdict.stage == "revoked"
+    assert dat["grant_id"] in report.verdict.detail
+    assert peer.executed == [], "a revoked grant still put a call on the wire"
+    assert not (tmp_path / "e" / "receipt.json").exists()
+    envelope = json.loads((tmp_path / "e" / "authorization" / "aae_envelope.json").read_text())
+    assert envelope["outcome"] == "denied"
+    assert "authority_revoked" in envelope["policy_id"]
+    row = json.loads((tmp_path / "e" / "authorization" / "consent_event.json").read_text())
+    assert row["action"] == "consent.reject" and row["outcome"] == "denied"
+
+
+def test_control_the_same_grant_unrevoked_does_reach_the_peer(alice, peer, tmp_path):
+    """Pairs with the test above. Without it, a refusal for some unrelated
+    reason — a broken fixture, a peer that never starts — reads as a revocation
+    working."""
+    dat = _grant(alice)
+
+    report = _call(alice, peer, dat, tmp_path / "e")
+
+    assert report.outcome == "sent", report
+    assert peer.executed == [("save_note", {"key": "k", "value": "v"})]
+
+
+def test_revoking_the_ancestor_stops_the_agent_that_was_sub_delegated(alice, peer, tmp_path):
+    """The chain case, end to end. The agent holds a sub-delegated grant and the
+    ancestor is withdrawn upstream; nothing about the leaf changed. If the verb
+    did not hand the verifier its ancestors, this would send."""
+    # Three real parties: root → middle → alice. An agent re-delegating to
+    # itself is not a topology anyone runs, and it would not exercise the
+    # continuity rule (a child's grantor must be its parent's grantee).
+    middle_sk = Ed25519PrivateKey.generate().private_bytes_raw()
+    middle_did = did_from_private_key(middle_sk)
+    root_sk = Ed25519PrivateKey.generate().private_bytes_raw()
+    root = build_dat(
+        grantor_sk_bytes=root_sk,
+        grantor_did=did_from_private_key(root_sk),
+        grantee_did=middle_did,
+        action_categories=[delegated_call.action_name("save_note")],
+        not_after=TOMORROW,
+    )
+    leaf = build_dat(
+        grantor_sk_bytes=middle_sk,
+        grantor_did=middle_did,
+        grantee_did=_did(alice),
+        action_categories=[delegated_call.action_name("save_note")],
+        not_after=TOMORROW,
+        granted_by=root["grant_id"],
+    )
+    store = _store(alice)
+    store.add(root)
+    store.add(leaf)
+    assert _call(alice, peer, leaf, tmp_path / "ok").outcome == "sent", (
+        "the chain must be sound before revoking proves anything"
+    )
+    peer.executed.clear()
+
+    store.revoke(root["grant_id"], reason="operator withdrew the chapter's authority")
+    report = _call(alice, peer, leaf, tmp_path / "e", task_id="after-revocation")
+
+    assert report.outcome == "refused", report
+    assert report.verdict.stage == "revoked"
+    assert root["grant_id"] in report.verdict.detail, "the leaf was refused for the wrong reason"
+    assert peer.executed == [], "authority outlived the grant it was delegated from"
+
+
+def test_a_revocation_recorded_by_the_cli_is_what_the_verb_reads(alice, peer, tmp_path):
+    """The operator's path, end to end: `community-member dat revoke <id>` and
+    then a call. Two components agreeing on a store is the whole mechanism, and
+    a mismatch here would leave the CLI writing somewhere nothing reads."""
+    from community_member.cli import _cmd_dat_revoke
+
+    dat = _grant(alice)
+
+    assert _cmd_dat_revoke(dat["grant_id"], "operator revoked it", config=alice) == 0
+    report = _call(alice, peer, dat, tmp_path / "e")
+
+    assert report.outcome == "refused"
+    assert report.verdict.stage == "revoked"
+    assert peer.executed == []
