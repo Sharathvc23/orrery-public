@@ -22,6 +22,8 @@ from community_member.consult import (
     Answer,
     build_verdict,
     evidence_digest,
+    from_consultation,
+    gather,
     majority,
     recompute,
     unanimous,
@@ -148,3 +150,107 @@ def test_the_digest_is_stable_and_changes_with_the_answers():
 
     assert evidence_digest(a) == evidence_digest(b)
     assert evidence_digest(a) != evidence_digest(c)
+
+
+# ── gathering: every peer is accounted for ──────────────────────────────────
+
+
+class _Report:
+    """Shaped like delegated_call.CallReport, which is what gather() consumes."""
+
+    def __init__(self, outcome="sent", counterparty_did=None, result=None, receipt_id="r1"):
+        self.outcome = outcome
+        self.counterparty_did = counterparty_did
+        self.result = result
+        self.receipt_id = receipt_id
+
+
+def test_every_peer_lands_in_answers_or_silent():
+    """The invariant that stops a non-answer from disappearing."""
+    peers = ["did:key:zA", "did:key:zB", "did:key:zC", "did:key:zD"]
+
+    def ask(peer):
+        if peer == "did:key:zA":
+            return _Report(result={"position": "book"}, counterparty_did=peer)
+        if peer == "did:key:zB":
+            return _Report(outcome="refused")
+        if peer == "did:key:zC":
+            raise ConnectionError("no route")
+        return _Report(outcome="unreceipted")
+
+    consultation = gather("book?", peers, ask)
+
+    assert consultation.asked == len(peers)
+    assert len(consultation.answers) == 1
+    assert len(consultation.silent) == 3
+
+
+def test_control_silence_is_carried_into_the_verdict():
+    """A verdict over three of ten is a different claim from three of three.
+
+    If silence is dropped, a reader given only the answers cannot tell which
+    they are looking at — and an org could ask ten and report the three that
+    agreed.
+    """
+    consultation = gather(
+        "book?",
+        ["did:key:zA", "did:key:zB"],
+        lambda p: (
+            _Report(result={"position": "book"}, counterparty_did=p)
+            if p == "did:key:zA"
+            else _Report(outcome="refused")
+        ),
+    )
+    payload = from_consultation(consultation).as_payload()
+
+    assert payload["asked"] == 2
+    assert len(payload["answers"]) == 1
+    assert payload["silent"] == [{"agent_did": "did:key:zB", "reason": "refused"}], (
+        "a peer that was asked and declined vanished from the verdict"
+    )
+
+
+def test_an_unreachable_peer_does_not_abort_the_consultation():
+    """Nine of ten answering is a result. Aborting would discard it."""
+    peers = [f"did:key:z{i}" for i in range(10)]
+
+    def ask(peer):
+        if peer == "did:key:z3":
+            raise TimeoutError("gone")
+        return _Report(result={"position": "book"}, counterparty_did=peer)
+
+    consultation = gather("book?", peers, ask)
+
+    assert len(consultation.answers) == 9
+    assert consultation.silent[0].reason.startswith("unreachable")
+    assert consultation.response_rate == 0.9
+
+
+def test_an_answer_with_no_position_is_silence_not_a_vote():
+    """A reply that says nothing must not be counted as agreement."""
+    consultation = gather("book?", ["did:key:zA"], lambda p: _Report(result={"rationale": "hmm"}))
+
+    assert consultation.answers == ()
+    assert consultation.silent[0].reason == "answered without a position"
+
+
+def test_the_reasons_for_silence_stay_distinguishable():
+    """`refused` and `unreceipted` are different facts: one is a peer declining,
+    the other an action that happened with no receipt to show for it."""
+    consultation = gather(
+        "book?",
+        ["did:key:zA", "did:key:zB"],
+        lambda p: _Report(outcome="refused" if p == "did:key:zA" else "unreceipted"),
+    )
+
+    assert {s.reason for s in consultation.silent} == {"refused", "unreceipted"}
+
+
+def test_a_gathered_verdict_still_recomputes():
+    consultation = gather(
+        "book?",
+        ["did:key:zA", "did:key:zB"],
+        lambda p: _Report(result={"position": "book"}, counterparty_did=p),
+    )
+    agrees, detail = recompute(from_consultation(consultation).as_payload())
+    assert agrees, detail

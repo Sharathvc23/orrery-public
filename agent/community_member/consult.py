@@ -37,16 +37,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = [
     "Answer",
+    "Consultation",
+    "Silent",
+    "gather",
     "RULES",
     "Verdict",
     "build_verdict",
     "evidence_digest",
+    "from_consultation",
     "majority",
     "recompute",
     "unanimous",
@@ -74,6 +78,41 @@ class Answer:
 
 
 @dataclass(frozen=True)
+class Silent:
+    """An agent that was asked and did not answer, and why.
+
+    Recorded rather than dropped. A consultation that only lists the agents who
+    replied lets an org ask ten and report the three that agreed, and the
+    omission is invisible afterwards — nothing in a set of receipts reveals a
+    receipt that was never created. Silence is evidence about the consultation;
+    losing it changes what the verdict means.
+    """
+
+    agent_did: str
+    reason: str  # refused | unreachable | unreceipted | malformed
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"agent_did": self.agent_did, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class Consultation:
+    """Everyone asked, split into those who answered and those who did not."""
+
+    question: str
+    answers: tuple[Answer, ...]
+    silent: tuple[Silent, ...] = ()
+
+    @property
+    def asked(self) -> int:
+        return len(self.answers) + len(self.silent)
+
+    @property
+    def response_rate(self) -> float:
+        return len(self.answers) / self.asked if self.asked else 0.0
+
+
+@dataclass(frozen=True)
 class Verdict:
     """What the org concluded, and everything needed to check it."""
 
@@ -82,6 +121,7 @@ class Verdict:
     outcome: str
     answers: tuple[Answer, ...]
     tally: dict[str, int] = field(default_factory=dict)
+    silent: tuple[Silent, ...] = ()
 
     @property
     def independent_counterparties(self) -> int:
@@ -95,6 +135,12 @@ class Verdict:
             "outcome": self.outcome,
             "tally": dict(self.tally),
             "answers": [a.as_dict() for a in self.answers],
+            # Who was asked and did not answer, and why. A verdict computed over
+            # three of ten agents is a different claim from one computed over
+            # three of three, and a reader given only the answers cannot tell
+            # which they are looking at.
+            "silent": [s.as_dict() for s in self.silent],
+            "asked": len(self.answers) + len(self.silent),
             "distinct_signers": self.independent_counterparties,
             # Carried in the payload rather than left to a reader's judgement:
             # a verdict that does not say what it fails to establish will be
@@ -144,11 +190,78 @@ RULES = {"majority": majority, "unanimous": unanimous}
 # ── building and re-deriving ────────────────────────────────────────────────
 
 
-def build_verdict(question: str, answers: Sequence[Answer], *, rule: str = "majority") -> Verdict:
+def build_verdict(
+    question: str,
+    answers: Sequence[Answer],
+    *,
+    rule: str = "majority",
+    silent: Sequence[Silent] = (),
+) -> Verdict:
     if rule not in RULES:
         raise ValueError(f"unknown rule {rule!r}; known: {', '.join(sorted(RULES))}")
     outcome, tally = RULES[rule](answers)
-    return Verdict(question=question, rule=rule, outcome=outcome, answers=tuple(answers), tally=tally)
+    return Verdict(
+        question=question,
+        rule=rule,
+        outcome=outcome,
+        answers=tuple(answers),
+        tally=tally,
+        silent=tuple(silent),
+    )
+
+
+def from_consultation(consultation: Consultation, *, rule: str = "majority") -> Verdict:
+    """Build a verdict that carries the whole consultation, silence included."""
+    return build_verdict(consultation.question, consultation.answers, rule=rule, silent=consultation.silent)
+
+
+def gather(question: str, peers: Sequence[str], ask: Callable[[str], Any]) -> Consultation:
+    """Ask every peer, and account for every one of them.
+
+    ``ask(peer_did)`` performs the call and returns whatever the transport
+    produces — here, an object shaped like ``delegated_call.CallReport``. Every
+    peer lands in exactly one of ``answers`` or ``silent``; the invariant
+    ``asked == len(answers) + len(silent)`` is what stops a non-answer from
+    quietly disappearing.
+
+    A raised exception is a *reason*, not a crash. An org whose consultation
+    aborts because one colleague was unreachable has learned nothing, and
+    treating the outcome as "no verdict" when nine of ten answered would be its
+    own distortion.
+    """
+    answers: list[Answer] = []
+    silent: list[Silent] = []
+
+    for peer in peers:
+        try:
+            report = ask(peer)
+        except Exception as exc:  # noqa: BLE001 - an unreachable peer is data
+            silent.append(Silent(agent_did=peer, reason=f"unreachable: {str(exc)[:80]}"))
+            continue
+
+        outcome = getattr(report, "outcome", None)
+        if outcome != "sent":
+            # `refused` and `unreceipted` are meaningfully different from an
+            # error, and from each other: one is a peer declining, the other an
+            # action that happened with no receipt to show for it.
+            silent.append(Silent(agent_did=peer, reason=str(outcome or "malformed")))
+            continue
+
+        position = ((report.result or {}) if hasattr(report, "result") else {}).get("position")
+        if not position:
+            silent.append(Silent(agent_did=peer, reason="answered without a position"))
+            continue
+
+        answers.append(
+            Answer(
+                agent_did=getattr(report, "counterparty_did", None) or peer,
+                position=str(position),
+                rationale=str((report.result or {}).get("rationale", "")),
+                receipt_id=getattr(report, "receipt_id", None),
+            )
+        )
+
+    return Consultation(question=question, answers=tuple(answers), silent=tuple(silent))
 
 
 def recompute(payload: dict[str, Any]) -> tuple[bool, str]:
