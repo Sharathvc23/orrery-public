@@ -63,6 +63,17 @@ FLOORS: dict[str, dict[str, float]] = {
         # lands. Measured 97.0% at that point, floored 2 points under per the
         # ratchet policy above.
         "community_member/platform_events.py": 95.0,
+        # The authority decision point and the store that feeds it. These carry
+        # floors because of how the revocation gap was found, not in spite of
+        # it: every piece of revocation existed and none of them touched —
+        # verify_dat_chain honoured a revocation set, check_authority could
+        # return `revoked`, and nothing passed one between them, so no grant was
+        # ever treated as withdrawn. An untested branch here is a branch that
+        # decides whether a withdrawn grant still authorises a call. Measured
+        # 100.0% and 81.5% when the wiring landed, floored per the ratchet
+        # policy above.
+        "community_member/dat.py": 98.0,
+        "community_member/delegated_call.py": 79.0,
     },
 }
 

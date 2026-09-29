@@ -113,8 +113,32 @@ class AuthorityVerdict:
     grant_id: str | None
 
 
-def check_authority(dat: dict[str, Any], *, self_did: str, tool: str, now: str | None = None) -> AuthorityVerdict:
-    """Decide whether ``dat`` authorises THIS agent to call ``tool`` now."""
+def check_authority(
+    dat: dict[str, Any],
+    *,
+    self_did: str,
+    tool: str,
+    now: str | None = None,
+    revocations: set[str] | None = None,
+    dats_by_id: dict[str, dict[str, Any]] | None = None,
+) -> AuthorityVerdict:
+    """Decide whether ``dat`` authorises THIS agent to call ``tool`` now.
+
+    ``revocations`` is the set of withdrawn grant ids — typically
+    ``DatStore.revoked()``. It is checked at **every hop** of the chain, not just
+    the leaf, so withdrawing an ancestor grant withdraws everything delegated
+    beneath it.
+
+    Passing it is what makes revocation real here. ``verify_dat_chain`` has
+    always honoured a revocation set, and this function has always been able to
+    return ``revoked`` — but it never supplied one, so the set was empty and no
+    grant was ever treated as withdrawn. The surface read as though revocation
+    worked from both ends while nothing carried it between them.
+
+    ``dats_by_id`` supplies ancestor grants for a sub-delegated DAT. Without it a
+    chained grant cannot be walked to its root, and an ancestor revoked upstream
+    is invisible.
+    """
     grant_id = dat.get("grant_id") if isinstance(dat, dict) else None
     if not isinstance(dat, dict) or not isinstance(grant_id, str):
         return AuthorityVerdict(False, "no_grant", "no grant was presented (not a DAT: no grant_id)", None)
@@ -125,7 +149,13 @@ def check_authority(dat: dict[str, Any], *, self_did: str, tool: str, now: str |
         detail = f"grant {grant_id} is self-granted: grantor is this agent's own key"
         return AuthorityVerdict(False, "grantor", detail, grant_id)
     now = now or _now_iso()
-    result = verify_counterparty_dat(dat, now=now, category=action_name(tool))
+    result = verify_counterparty_dat(
+        dat,
+        now=now,
+        category=action_name(tool),
+        revocations=revocations,
+        dats_by_id=dats_by_id,
+    )
     if result.ok:
         return AuthorityVerdict(True, "accepted", f"grant {grant_id} authorises {action_name(tool)}", grant_id)
     if result.stage == "window":

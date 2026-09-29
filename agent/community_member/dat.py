@@ -101,6 +101,20 @@ class DatStore:
                 """
             )
             c.execute("CREATE INDEX IF NOT EXISTS idx_dats_grantee ON dats(grantee_did)")
+            # Revocations are recorded separately rather than by deleting the
+            # grant. A grant that is gone and a grant that was withdrawn are
+            # different facts: receipts already issued under it still name it,
+            # and a verifier asking "was this authorised at the time?" needs the
+            # grant to still exist alongside the knowledge that it was revoked.
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS revocations (
+                    grant_id   TEXT PRIMARY KEY,
+                    revoked_at TEXT NOT NULL,
+                    reason     TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
 
     def add(self, dat: dict[str, Any]) -> None:
         """Persist a DAT. Idempotent on ``grant_id``."""
@@ -121,6 +135,30 @@ class DatStore:
         with self._conn() as c:
             row = c.execute("SELECT dat_json FROM dats WHERE grant_id = ?", (grant_id,)).fetchone()
         return json.loads(row["dat_json"]) if row else None
+
+    def revoke(self, grant_id: str, *, reason: str = "", at: str | None = None) -> None:
+        """Record that a grant was withdrawn. Idempotent; the grant itself stays.
+
+        Deleting the grant instead would erase the history a verifier needs: a
+        receipt issued while the grant was live still names it, and answering
+        "was this authorised when it happened?" requires both the grant and the
+        fact of its revocation.
+        """
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO revocations (grant_id, revoked_at, reason) VALUES (?, ?, ?)",
+                (grant_id, at or _now_iso(), reason),
+            )
+
+    def revoked(self) -> set[str]:
+        """Every grant id withdrawn so far — what ``verify_dat_chain`` consumes."""
+        with self._conn() as c:
+            return {r["grant_id"] for r in c.execute("SELECT grant_id FROM revocations")}
+
+    def is_revoked(self, grant_id: str) -> bool:
+        with self._conn() as c:
+            row = c.execute("SELECT 1 FROM revocations WHERE grant_id = ?", (grant_id,)).fetchone()
+        return row is not None
 
     def list_for_grantee(self, grantee_did: str) -> list[dict[str, Any]]:
         with self._conn() as c:
