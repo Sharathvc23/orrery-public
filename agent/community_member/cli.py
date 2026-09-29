@@ -316,10 +316,16 @@ def _cmd_disclose_verify(bundle_path: Path, *, issuer: str | None, issuer_from: 
     return 2
 
 
-def _cmd_dat_verify(dat_path: Path, chain_path: Path | None, category: str | None) -> int:
+def _cmd_dat_verify(dat_path: Path, chain_path: Path | None, category: str | None, config: Config | None = None) -> int:
     """Verify a counterparty's Delegated Authority Token — signature, validity
     window, scope, the full sub-delegation chain, and revocation — BEFORE
-    transacting, instead of trusting a chapter to vouch. Exit 0 iff verified."""
+    transacting, instead of trusting a chapter to vouch. Exit 0 iff verified.
+
+    The revocation set is what THIS member has recorded (``dat revoke``). The
+    verb cannot discover a withdrawal it was never told about, so a clean result
+    means "not revoked as far as this member knows", which is a narrower claim
+    than "not revoked" and is printed as such.
+    """
     import json
 
     from community_member import dat as dat_mod
@@ -342,17 +348,62 @@ def _cmd_dat_verify(dat_path: Path, chain_path: Path | None, category: str | Non
         elif isinstance(chain, dict):
             dats_by_id = chain
 
+    store = dat_mod.DatStore(home=(config or Config.load()).home)
+    revocations = store.revoked()
+    # Ancestors the member already holds, so a sub-delegation can be walked to
+    # its root without --chain. An explicitly supplied chain wins: the caller is
+    # vetting what the counterparty presented, not what we happen to have.
+    pool = {**store.pool(), **(dats_by_id or {})} or None
+
     try:
-        result = dat_mod.verify_counterparty_dat(dat, category=category, dats_by_id=dats_by_id)
+        result = dat_mod.verify_counterparty_dat(dat, category=category, dats_by_id=pool, revocations=revocations)
     except (KeyError, TypeError, ValueError) as e:
         console.print(f"[red]Malformed DAT:[/red] {type(e).__name__}: {e}")
         return 1
 
     if result.ok:
         console.print(f"[green]DAT verified[/green] — {result.detail}")
+        _plain(f"  not revoked as far as this member knows ({len(revocations)} revocation(s) on record)")
         return 0
     console.print(f"[red]DAT verification FAILED[/red] (stage: {result.stage}) — {result.detail}")
     return 2
+
+
+def _cmd_dat_revoke(grant_id: str, reason: str, config: Config | None = None) -> int:
+    """Withdraw a grant, so this member stops honouring it.
+
+    Recorded beside the grant rather than by deleting it: a receipt issued while
+    the grant was live still names it, and answering "was this authorised when
+    it happened?" needs both the grant and the fact of its revocation.
+
+    Local and immediate. Nothing is published and no counterparty is told — the
+    effect is that this member's own ``call`` and ``dat verify`` refuse the
+    grant from now on, at every hop of anything delegated beneath it.
+    """
+    from community_member import dat as dat_mod
+
+    store = dat_mod.DatStore(home=(config or Config.load()).home)
+    held = store.get(grant_id)
+    store.revoke(grant_id, reason=reason)
+    console.print(f"[yellow]revoked[/yellow] {grant_id}" + (f" — {reason}" if reason else ""))
+    if held is None:
+        # Not an error: an operator can withdraw a grant this member never
+        # collected, and the refusal still applies if it is presented later.
+        _plain("  note: this member does not hold that grant; the revocation stands for when it is presented")
+    return 0
+
+
+def _cmd_dat_revocations(config: Config | None = None) -> int:
+    """List what this member has withdrawn — the set every check consults."""
+    from community_member import dat as dat_mod
+
+    revoked = sorted(dat_mod.DatStore(home=(config or Config.load()).home).revoked())
+    if not revoked:
+        _plain("no revocations on record")
+        return 0
+    for grant_id in revoked:
+        _plain(grant_id)
+    return 0
 
 
 def _plain(text: str) -> None:
@@ -1060,6 +1111,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_dat_verify.add_argument("--category", default=None, help="Category to check against the leaf grant's scope.")
     p_dat_verify.set_defaults(func=lambda args: _cmd_dat_verify(args.dat, args.chain, args.category))
+    p_dat_revoke = dat_sub.add_parser(
+        "revoke",
+        help="Withdraw a grant: this member stops honouring it, and everything delegated beneath it.",
+    )
+    p_dat_revoke.add_argument("grant_id", help="The grant_id to withdraw.")
+    p_dat_revoke.add_argument("--reason", default="", help="Why, recorded beside the revocation.")
+    p_dat_revoke.set_defaults(func=lambda args: _cmd_dat_revoke(args.grant_id, args.reason))
+    p_dat_revocations = dat_sub.add_parser("revocations", help="List the grants this member has withdrawn.")
+    p_dat_revocations.set_defaults(func=lambda args: _cmd_dat_revocations())
     p_dat_grant = dat_sub.add_parser(
         "grant",
         help="As a principal, sign a DAT letting one agent call one tool on a peer over A2A "

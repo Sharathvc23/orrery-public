@@ -160,6 +160,19 @@ class DatStore:
             row = c.execute("SELECT 1 FROM revocations WHERE grant_id = ?", (grant_id,)).fetchone()
         return row is not None
 
+    def pool(self) -> dict[str, dict[str, Any]]:
+        """Every held DAT, keyed by ``grant_id`` — the shape ``dats_by_id`` wants.
+
+        A chained grant cannot be walked to its root without its ancestors, so a
+        caller that passes nothing gets ``delegation: parent not found`` on a
+        perfectly good sub-delegation, and an ancestor revoked upstream is
+        invisible either way. Handing the verifier everything this member holds
+        is what lets it walk as far as the evidence actually reaches.
+        """
+        with self._conn() as c:
+            rows = c.execute("SELECT grant_id, dat_json FROM dats").fetchall()
+        return {r["grant_id"]: json.loads(r["dat_json"]) for r in rows}
+
     def list_for_grantee(self, grantee_did: str) -> list[dict[str, Any]]:
         with self._conn() as c:
             rows = c.execute(

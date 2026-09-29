@@ -17,6 +17,7 @@ from community_member import cli
 from community_member import dat as dat_mod
 from community_member._dat import DatResult
 from community_member.checkpoint import MembershipResult
+from community_member.config import Config
 
 
 def _write(p: Path, obj) -> Path:
@@ -55,15 +56,54 @@ def test_dat_verify_malformed_exit1(tmp_path):
 def test_dat_verify_chain_list_is_loaded(tmp_path, monkeypatch):
     seen = {}
 
-    def _capture(dat, *, category=None, dats_by_id=None):
+    def _capture(dat, *, category=None, dats_by_id=None, revocations=None):
         seen["dats_by_id"] = dats_by_id
         return DatResult(True, "accepted", "ok")
 
     monkeypatch.setattr(dat_mod, "verify_counterparty_dat", _capture)
     dat_f = _write(tmp_path / "dat.json", {"grant_id": "leaf"})
     chain_f = _write(tmp_path / "chain.json", [{"grant_id": "root"}, {"grant_id": "mid"}])
-    assert cli._cmd_dat_verify(dat_f, chain_f, None) == 0
-    assert set(seen["dats_by_id"]) == {"root", "mid"}
+    assert cli._cmd_dat_verify(dat_f, chain_f, None, config=Config(home=tmp_path / "home")) == 0
+    assert set(seen["dats_by_id"]) >= {"root", "mid"}
+
+
+def test_dat_verify_hands_the_verifier_what_this_member_revoked(tmp_path, monkeypatch):
+    """The verb's docstring says it checks revocation; this is what makes that
+    true rather than merely claimed.
+
+    ``dat verify`` used to call the verifier with no revocation set, which meant
+    the argument defaulted to None, None meant allow, and a grant the operator
+    had withdrawn verified clean. The stub asserts the set arrives, so the
+    argument cannot be dropped again without this going red.
+    """
+    seen = {}
+
+    def _capture(dat, *, category=None, dats_by_id=None, revocations=None):
+        seen["revocations"] = revocations
+        return DatResult(True, "accepted", "ok")
+
+    monkeypatch.setattr(dat_mod, "verify_counterparty_dat", _capture)
+    config = Config(home=tmp_path / "home")
+    assert cli._cmd_dat_revoke("withdrawn-1", "key rotated", config=config) == 0
+
+    f = _write(tmp_path / "dat.json", {"grant_id": "g1"})
+    assert cli._cmd_dat_verify(f, None, None, config=config) == 0
+
+    assert seen["revocations"] == {"withdrawn-1"}, "the verb verified against an empty revocation set"
+
+
+def test_dat_revocations_lists_what_was_revoked(tmp_path, capsys):
+    config = Config(home=tmp_path / "home")
+    assert cli._cmd_dat_revocations(config=config) == 0
+    assert "no revocations on record" in capsys.readouterr().out
+
+    cli._cmd_dat_revoke("g-1", "", config=config)
+    cli._cmd_dat_revoke("g-2", "", config=config)
+    capsys.readouterr()
+
+    assert cli._cmd_dat_revocations(config=config) == 0
+    out = capsys.readouterr().out
+    assert "g-1" in out and "g-2" in out
 
 
 def test_main_wires_dat_verb(tmp_path, monkeypatch):
