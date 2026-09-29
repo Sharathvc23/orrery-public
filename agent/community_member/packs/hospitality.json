@@ -1,0 +1,7 @@
+{
+  "id": "hospitality",
+  "name": "Hospitality pack",
+  "description": "Book a table at a real venue: check what is open, hold a slot pending everyone's agreement, and sign a receipt when the booking confirms. Unlike the starter pack's appointment book, this talks to a venue that can refuse.",
+  "default_installed": false,
+  "skills": ["venue_book"]
+}

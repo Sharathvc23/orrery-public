@@ -84,6 +84,12 @@ FLOORS: dict[str, dict[str, float]] = {
         # reading coverage rather than by anything failing, which is the case
         # the floor exists to stop recurring.
         "community_member/authority_audit.py": 98.0,
+        # The only skill that books against a counterparty that can refuse, and
+        # the only one that makes this agent countersign a booking. An uncovered
+        # branch here is a booking that looks signed and is not, or a slot fold
+        # that silently stops pairing with the venue's — a failure neither
+        # receipt reveals on its own. Measured 100% when it landed.
+        "community_member/builtin_skills/venue_book/skill.py": 98.0,
     },
 }
 

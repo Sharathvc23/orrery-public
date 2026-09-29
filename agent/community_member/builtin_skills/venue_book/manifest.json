@@ -1,0 +1,7 @@
+{
+  "name": "venue_book",
+  "version": "1.0.0",
+  "description": "Book a table at a real venue over A2A: check availability, hold a slot, give consent, and emit a signed appointment_booked receipt when every principal has agreed.",
+  "capabilities": ["net.http"],
+  "builtin": true
+}
