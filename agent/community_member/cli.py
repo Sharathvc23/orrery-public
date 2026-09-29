@@ -393,6 +393,56 @@ def _cmd_dat_revoke(grant_id: str, reason: str, config: Config | None = None) ->
     return 0
 
 
+def _cmd_dat_audit(dat_path: Path, chain_path: Path | None, config: Config | None = None) -> int:
+    """Walk a grant to its root and report every hop — where `verify` decides.
+
+    ``verify`` answers "may this proceed?" and stops at the first failure.
+    An operator asking "why can my agent no longer act?" needs the whole chain:
+    a grant of their own that is perfectly sound, and a chapter's grant two hops
+    up that was withdrawn, are the same single "no" from the gate and completely
+    different instructions to a human.
+
+    Offline. Everything comes from the DATs on disk and the revocations this
+    member recorded; nothing is fetched. Exit 0 iff the chain is intact.
+    """
+    import json
+
+    from community_member import dat as dat_mod
+    from community_member.authority_audit import walk_authority
+
+    try:
+        leaf = json.loads(dat_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        console.print(f"[red]Cannot read DAT:[/red] {e}")
+        return 1
+
+    store = dat_mod.DatStore(home=(config or Config.load()).home)
+    pool = {**store.pool(), leaf.get("grant_id", "_leaf"): leaf}
+    if chain_path is not None:
+        try:
+            chain = json.loads(chain_path.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            console.print(f"[red]Cannot read chain:[/red] {e}")
+            return 1
+        supplied = chain if isinstance(chain, dict) else {d.get("grant_id", f"_{i}"): d for i, d in enumerate(chain)}
+        pool.update(supplied)
+
+    walk = walk_authority(leaf.get("grant_id", "_leaf"), dats_by_id=pool, revocations=store.revoked())
+
+    colour = {"intact": "green", "severed": "red", "unresolvable": "yellow", "disputed": "magenta"}
+    console.print(f"[{colour.get(walk.verdict, 'white')}]{walk.verdict.upper()}[/] — {walk.reason}")
+    for i, hop in enumerate(walk.hops):
+        mark = "ok  " if hop.ok else "BAD "
+        _plain(f"  {mark}[{i}] {hop.grant_id}")
+        _plain(f"        {hop.grantor_did[:28]}… -> {hop.grantee_did[:28]}…  until {hop.not_after}")
+        if not hop.ok:
+            _plain(f"        problem: {hop.problem}")
+    _plain("  not established:")
+    for note in walk.not_established:
+        _plain(f"    - {note}")
+    return 0 if walk.ok else 2
+
+
 def _cmd_dat_revocations(config: Config | None = None) -> int:
     """List what this member has withdrawn — the set every check consults."""
     from community_member import dat as dat_mod
@@ -1118,6 +1168,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_dat_revoke.add_argument("grant_id", help="The grant_id to withdraw.")
     p_dat_revoke.add_argument("--reason", default="", help="Why, recorded beside the revocation.")
     p_dat_revoke.set_defaults(func=lambda args: _cmd_dat_revoke(args.grant_id, args.reason))
+    p_dat_audit = dat_sub.add_parser(
+        "audit",
+        help="Walk a grant to its root and report every hop (offline). Exit 0 iff the chain is intact.",
+    )
+    p_dat_audit.add_argument("dat", type=Path, help="Path to the leaf DAT JSON.")
+    p_dat_audit.add_argument(
+        "--chain",
+        type=Path,
+        default=None,
+        help="Ancestor DATs not already held locally (JSON list, or {grant_id: dat} map).",
+    )
+    p_dat_audit.set_defaults(func=lambda args: _cmd_dat_audit(args.dat, args.chain))
     p_dat_revocations = dat_sub.add_parser("revocations", help="List the grants this member has withdrawn.")
     p_dat_revocations.set_defaults(func=lambda args: _cmd_dat_revocations())
     p_dat_grant = dat_sub.add_parser(
