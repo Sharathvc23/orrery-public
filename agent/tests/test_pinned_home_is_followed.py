@@ -58,6 +58,11 @@ NOT_A_LOCATION = {
     # bound to a location at import, and the file it names is a checked-in
     # measurement rather than agent state, so a pinned home does not apply.
     "PROBE_RELATIVE_PATH",
+    # index_boot.py — the well-known suffix appended to AGENT_PUBLIC_URL to
+    # form the next_hop this agent registers. A URL path on somebody else's
+    # origin, like DOMAIN_CHALLENGE_HTTP_PATH above; it names nothing on this
+    # filesystem, so a pinned home has nothing to say about it.
+    "CARD_PATH",
 }
 
 PATHY = {"Path", "home", "expanduser", "gettempdir", "mkdtemp", "abspath", "realpath"}

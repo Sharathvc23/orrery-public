@@ -373,8 +373,13 @@ def create_app(config: Config, agent=None) -> FastAPI:
         # not create_app body, so building the app in unit tests doesn't mint
         # badges (TestClient only runs it as a context manager).
         from .conformance_boot import ensure_boot_badge
+        from .index_boot import announce_to_index
 
         ensure_boot_badge(_config)
+        # Claim this agent's own index name, when one is configured. Off unless
+        # NANDA_INDEX_V3_URL is set: an agent should not publish itself to a
+        # third party because it happened to start. Never fatal — see index_boot.
+        announce_to_index(_config)
         yield
 
     app = FastAPI(title=f"@{config.agent_id} Dashboard", docs_url=None, redoc_url=None, lifespan=_lifespan)
