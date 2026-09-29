@@ -88,8 +88,12 @@ def test_absent_intent_fields_are_omitted_not_nulled():
     """Under JCS an absent key and a null one are different bytes."""
     private_b64 = _key_b64()
     challenge = {
-        "challenge_id": "c1", "id": "urn:ai:key:uAAA/agent", "subject_key": "uAAA",
-        "next_hop": "https://agent.example", "media_type": AGENT_CARD_MEDIA_TYPE, "nonce": "n",
+        "challenge_id": "c1",
+        "id": "urn:ai:key:uAAA/agent",
+        "subject_key": "uAAA",
+        "next_hop": "https://agent.example",
+        "media_type": AGENT_CARD_MEDIA_TYPE,
+        "nonce": "n",
     }
     padded = dict(challenge, audience=None, not_after=None, prev=None)
 
@@ -110,9 +114,7 @@ def test_signing_constants_and_encoding_match_the_index():
     assert INTENT_FIELDS == tuple(THEIRS_FIELDS)
 
     private_b64 = _key_b64()
-    theirs = public_key_to_multibase(
-        Ed25519PrivateKey.from_private_bytes(base64.b64decode(private_b64)).public_key()
-    )
+    theirs = public_key_to_multibase(Ed25519PrivateKey.from_private_bytes(base64.b64decode(private_b64)).public_key())
     assert subject_key_of(private_b64) == theirs
 
 
@@ -129,8 +131,10 @@ def test_a_real_index_accepts_what_this_signs(tmp_path, monkeypatch):
     next_hop = "https://agent.example/.well-known/agent-card.json"
 
     record = register(
-        index_url="http://testserver", private_key_b64=private_b64,
-        next_hop=next_hop, http=client,
+        index_url="http://testserver",
+        private_key_b64=private_b64,
+        next_hop=next_hop,
+        http=client,
     )["record"]
 
     assert record["id"] == key_urn(subject_key_of(private_b64), "agent")
@@ -154,18 +158,26 @@ def test_the_index_refuses_a_signature_over_a_next_hop_it_never_issued(tmp_path,
     private_b64 = _key_b64()
     subject_key = subject_key_of(private_b64)
 
-    started = client.post("/v1/register", json={
-        "id": key_urn(subject_key, "agent"), "subject_key": subject_key,
-        "next_hop": "https://agent.example/card.json",
-        "media_type": AGENT_CARD_MEDIA_TYPE, "anchor_type": "key",
-    })
+    started = client.post(
+        "/v1/register",
+        json={
+            "id": key_urn(subject_key, "agent"),
+            "subject_key": subject_key,
+            "next_hop": "https://agent.example/card.json",
+            "media_type": AGENT_CARD_MEDIA_TYPE,
+            "anchor_type": "key",
+        },
+    )
     challenge = started.json()["challenge"]
 
     forged = dict(challenge, next_hop="https://attacker.example/card.json")
-    proved = client.post("/v1/prove", json={
-        "challenge_id": challenge["challenge_id"],
-        "response": {"subject_sig": sign_intent(private_b64, forged)},
-    })
+    proved = client.post(
+        "/v1/prove",
+        json={
+            "challenge_id": challenge["challenge_id"],
+            "response": {"subject_sig": sign_intent(private_b64, forged)},
+        },
+    )
 
     assert proved.status_code >= 400
 
@@ -182,8 +194,12 @@ def test_a_restart_does_not_append_to_an_append_only_log(tmp_path, monkeypatch):
     from api.app import build  # type: ignore[import-not-found]
 
     client = TestClient(build())
-    args = dict(index_url="http://testserver", private_key_b64=_key_b64(),
-                next_hop="https://agent.example/card.json", http=client)
+    args = dict(
+        index_url="http://testserver",
+        private_key_b64=_key_b64(),
+        next_hop="https://agent.example/card.json",
+        http=client,
+    )
 
     assert ensure_registered(**args)["action"] == "registered"
     size = client.get("/health").json()["tree_size"]
@@ -205,8 +221,12 @@ def test_a_record_near_expiry_is_renewed(tmp_path, monkeypatch):
     from api.app import build  # type: ignore[import-not-found]
 
     client = TestClient(build())
-    args = dict(index_url="http://testserver", private_key_b64=_key_b64(),
-                next_hop="https://agent.example/card.json", http=client)
+    args = dict(
+        index_url="http://testserver",
+        private_key_b64=_key_b64(),
+        next_hop="https://agent.example/card.json",
+        http=client,
+    )
 
     first = ensure_registered(**args)
     expires = datetime.fromisoformat(first["expires_at"].replace("Z", "+00:00"))
@@ -224,8 +244,10 @@ def test_an_unreachable_index_is_reported_not_raised():
             raise ConnectionError("index is down")
 
     result = ensure_registered(
-        index_url="http://index.test", private_key_b64=_key_b64(),
-        next_hop="https://agent.example", http=_Down(),
+        index_url="http://index.test",
+        private_key_b64=_key_b64(),
+        next_hop="https://agent.example",
+        http=_Down(),
     )
     assert result["action"] == "unreachable"
 
@@ -248,8 +270,41 @@ def test_a_refusal_is_reported_not_raised():
             return json.loads(self.text)
 
     result = ensure_registered(
-        index_url="http://index.test", private_key_b64=_key_b64(),
-        next_hop="https://agent.example", http=_Refusing(),
+        index_url="http://index.test",
+        private_key_b64=_key_b64(),
+        next_hop="https://agent.example",
+        http=_Refusing(),
     )
     assert result["action"] == "failed"
     assert "proof_rejected" in result["detail"]
+
+
+def test_register_raises_where_ensure_registered_reports():
+    """The two entry points differ on purpose.
+
+    ``register`` is the primitive and raises, so a caller doing a deliberate
+    one-shot registration finds out. ``ensure_registered`` runs on every start
+    and returns instead, because an index outage must not stop the agent.
+    """
+
+    class _Resp:
+        def __init__(self, status_code, text):
+            self.status_code, self.text = status_code, text
+
+        def json(self):
+            import json
+
+            return json.loads(self.text)
+
+    class _Refusing:
+        def post(self, *_a, **_k):
+            return _Resp(400, '{"error":"proof_rejected"}')
+
+    with pytest.raises(IndexV3Error) as exc:
+        register(
+            index_url="http://index.test",
+            private_key_b64=_key_b64(),
+            next_hop="https://agent.example",
+            http=_Refusing(),
+        )
+    assert "proof_rejected" in str(exc.value)

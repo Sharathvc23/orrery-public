@@ -38,8 +38,9 @@ from __future__ import annotations
 
 import base64
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +59,14 @@ __all__ = [
 # context string and will not verify against a v2 challenge.
 INTENT_CONTEXT = b"nanda-index-v3/intent-v2:"
 INTENT_FIELDS = (
-    "id", "subject_key", "next_hop", "media_type",
-    "nonce", "audience", "not_after", "prev",
+    "id",
+    "subject_key",
+    "next_hop",
+    "media_type",
+    "nonce",
+    "audience",
+    "not_after",
+    "prev",
 )
 
 _URN_KEY_PREFIX = "urn:ai:key:"
@@ -140,8 +147,11 @@ def register(
     started = client.post(
         f"{base}/v1/register",
         json={
-            "id": agent_id, "subject_key": subject_key, "next_hop": next_hop,
-            "media_type": media_type, "anchor_type": "key",
+            "id": agent_id,
+            "subject_key": subject_key,
+            "next_hop": next_hop,
+            "media_type": media_type,
+            "anchor_type": "key",
         },
         timeout=timeout,
     )
@@ -210,25 +220,32 @@ def ensure_registered(
         except ValueError:
             expires = None
         if expires is not None and (expires - clock()).total_seconds() > renew_within:
-            return {"action": "current", "id": agent_id,
-                    "seq": record.get("seq"), "expires_at": raw}
+            return {"action": "current", "id": agent_id, "seq": record.get("seq"), "expires_at": raw}
         action = "renewed"
     elif found.status_code == 404:
         # "never registered" and "lapsed" both land here, and the fix is the same.
         action = "registered"
     else:
         log.warning("index v3 resolve returned %s for %s", found.status_code, agent_id)
-        return {"action": "failed", "id": agent_id,
-                "detail": f"resolve returned {found.status_code}"}
+        return {"action": "failed", "id": agent_id, "detail": f"resolve returned {found.status_code}"}
 
     try:
         result = register(
-            index_url=base, private_key_b64=private_key_b64, next_hop=next_hop,
-            path=path, media_type=media_type, timeout=timeout, http=client,
+            index_url=base,
+            private_key_b64=private_key_b64,
+            next_hop=next_hop,
+            path=path,
+            media_type=media_type,
+            timeout=timeout,
+            http=client,
         )
     except IndexV3Error as exc:
         log.warning("index v3 registration failed for %s: %s", agent_id, exc)
         return {"action": "failed", "id": agent_id, "detail": str(exc)[:300]}
 
-    return {"action": action, "id": agent_id, "seq": result["record"]["seq"],
-            "expires_at": result["record"]["expires_at"]}
+    return {
+        "action": action,
+        "id": agent_id,
+        "seq": result["record"]["seq"],
+        "expires_at": result["record"]["expires_at"],
+    }
