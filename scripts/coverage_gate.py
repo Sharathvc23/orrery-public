@@ -78,8 +78,12 @@ FLOORS: dict[str, dict[str, float]] = {
         # branch here is not a branch that wrongly authorises anything — it is a
         # branch that misreports WHY authority was refused, which is what an
         # operator acts on. Measured 96.1% when it landed, floored 2 points
-        # under per the ratchet policy above.
-        "community_member/authority_audit.py": 94.0,
+        # under per the ratchet policy above. Ratcheted 94 -> 98 once the three
+        # refusals nothing drove were covered (not-yet-valid vs expired, a
+        # broken continuity link, and the depth limit) — the gap was found by
+        # reading coverage rather than by anything failing, which is the case
+        # the floor exists to stop recurring.
+        "community_member/authority_audit.py": 98.0,
     },
 }
 

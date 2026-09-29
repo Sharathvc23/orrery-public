@@ -259,3 +259,115 @@ def test_the_report_serialises_whole():
 
 def _root_id(pool: dict, leaf: dict) -> str:
     return leaf["granted_by"]
+
+
+# ── the refusals a coverage read showed had no test ─────────────────────────
+#
+# Each is a distinct instruction to an operator. "Not valid until 09:00",
+# "the chain is longer than the verifier will walk" and "this grant was never
+# given to the party below it" send someone to three different places, and a
+# walk that collapsed them would send two of the three to the wrong one.
+
+
+def test_a_grant_that_is_not_yet_valid_says_so_rather_than_expired():
+    operator, agent = _Party(), _Party()
+    dat = operator.grants(agent, not_before=_iso(2), not_after=_iso(48))
+
+    walk = walk_authority(dat["grant_id"], dats_by_id={dat["grant_id"]: dat})
+
+    assert walk.verdict == "severed"
+    assert "not valid until" in walk.hops[0].problem
+    assert "expired" not in walk.hops[0].problem, "a grant that has not started yet was reported as one that has ended"
+
+
+def test_editing_a_grant_s_window_is_caught_as_tampering_not_as_expiry():
+    """Ordering that matters, and it corrects an assumption I had to be shown.
+
+    Blanking the window fields of a signed DAT does not produce "no validity
+    window" — the signature covers the whole body, so it is caught as tampering
+    first. That is the right answer: telling an operator their authority has
+    lapsed, when what happened is that someone edited the grant, sends them to
+    renew a document they should be investigating.
+    """
+    operator, agent = _Party(), _Party()
+    dat = dict(operator.grants(agent))
+    dat["not_before"] = dat["not_after"] = ""
+
+    walk = walk_authority(dat["grant_id"], dats_by_id={dat["grant_id"]: dat})
+
+    assert walk.verdict == "severed"
+    assert walk.hops[0].signature_ok is False
+    assert "signature does not verify" in walk.hops[0].problem
+
+
+def test_a_genuinely_signed_grant_with_no_window_is_named_as_such():
+    """Reachable only for a grantor that signed a DAT without a window —
+    `build_dat` always sets one, so this is a hand-rolled or foreign grant.
+    Malformed, not out of date, and the walk says which."""
+    import base64
+
+    import jcs
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    operator, agent = _Party(), _Party()
+    body = {
+        "version": "0.1",
+        "grant_id": "dat:no-window",
+        "grantor_did": operator.did,
+        "grantee_did": agent.did,
+        "issued_at": _iso(-1),
+        "not_before": "",
+        "not_after": "",
+        "scope": {"action_categories": [CATEGORY]},
+        "human_summary": "no window",
+    }
+    signature = Ed25519PrivateKey.from_private_bytes(operator.seed).sign(jcs.canonicalize(body))
+    dat = {**body, "signature": base64.b64encode(signature).decode()}
+
+    walk = walk_authority(dat["grant_id"], dats_by_id={dat["grant_id"]: dat})
+
+    assert walk.hops[0].signature_ok is True, "the fixture is not genuinely signed"
+    assert walk.hops[0].within_window is False
+    assert walk.hops[0].problem == "no validity window"
+
+
+def test_a_broken_continuity_link_names_the_hop_that_broke_it():
+    """The grant below names a grantor this grant never granted to — a chain
+    assembled from two unrelated grants that happen to share an id."""
+    root, middle, other, agent = _Party(), _Party(), _Party(), _Party()
+    parent = root.grants(middle)
+    # `other` grants the leaf, but the leaf points at a parent whose grantee is
+    # `middle`. The signatures are all genuine; the chain is not.
+    leaf = other.grants(agent, granted_by=parent["grant_id"])
+
+    walk = walk_authority(
+        leaf["grant_id"],
+        dats_by_id={parent["grant_id"]: parent, leaf["grant_id"]: leaf},
+    )
+
+    assert walk.verdict == "severed"
+    assert walk.severed_at == parent["grant_id"]
+    assert "never granted to" in walk.hops[1].problem
+    assert walk.hops[1].continuous_with_child is False
+
+
+def test_a_chain_longer_than_the_verifier_walks_is_unresolvable_not_severed():
+    """The depth limit is the verifier's, and the audit must stop where it
+    stops. Reporting `severed` would tell an operator a grant was withdrawn
+    when what happened is that nobody looked."""
+    from community_member._dat import MAX_CHAIN_DEPTH
+
+    parties = [_Party() for _ in range(MAX_CHAIN_DEPTH + 3)]
+    pool, previous = {}, None
+    for grantor, grantee in zip(parties, parties[1:], strict=False):
+        dat = grantor.grants(grantee, granted_by=previous)
+        pool[dat["grant_id"]] = dat
+        previous = dat["grant_id"]
+    leaf_id = previous
+
+    walk = walk_authority(leaf_id, dats_by_id=pool)
+
+    assert walk.verdict == "unresolvable"
+    assert f"depth {MAX_CHAIN_DEPTH}" in walk.reason
+    assert walk.root_grant_id is None, "a root was claimed for a chain never walked to one"
+    assert len(walk.hops) == MAX_CHAIN_DEPTH
