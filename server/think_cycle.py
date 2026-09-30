@@ -135,6 +135,21 @@ async def run_cycle():
     """
     global think_cycle_count
     think_cycle_count += 1
+    # ⚠️ THE PER-CYCLE LLM BUDGET IS RESET HERE BECAUSE NOTHING RESET IT.
+    #
+    # ``llm_runtime.CYCLE_BUDGET`` is module-level and documented as "reset at the
+    # top of each cycle by the caller that owns the cycle". This is that caller,
+    # and it never did — so the bound was a PROCESS-LIFETIME cap of 60 calls
+    # rather than a per-cycle one. Measured on 2026-09-30: both live org servers
+    # answered every LLM-mediated request with "this cycle has made 60 LLM calls,
+    # its limit", while the message promised the work was "left for the next
+    # cycle". There was no next cycle.
+    #
+    # The limit is re-read rather than reused so an operator can change
+    # ``LLM_MAX_CALLS_PER_CYCLE`` without a redeploy — and a redeploy is what an
+    # operator would reach for to clear a stuck cap, which would have made the
+    # real defect look like a configuration mistake they had just fixed.
+    llm_runtime.CYCLE_BUDGET.reset(llm_runtime.calls_per_cycle())
     cycle_types = [
         "introduction_propose",  # writes to pending_approvals, no direct action
         "insight",
