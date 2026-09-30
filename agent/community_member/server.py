@@ -411,9 +411,7 @@ def create_app(config: Config, agent=None) -> FastAPI:
     # endpoint on the same app, which authenticates its own callers — never
     # receives the wildcard. The org server carries the same middleware for the
     # same reason; this is the agent's half of it.
-    _public_docs = frozenset(
-        path for method, path in local_auth.OPEN_ROUTES if method == "GET" and "{" not in path
-    )
+    _public_docs = frozenset(path for method, path in local_auth.OPEN_ROUTES if method == "GET" and "{" not in path)
 
     @app.middleware("http")
     async def public_read_cors(request, call_next):
@@ -426,9 +424,7 @@ def create_app(config: Config, agent=None) -> FastAPI:
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-                    "Access-Control-Allow-Headers": request.headers.get(
-                        "access-control-request-headers", "*"
-                    ),
+                    "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*"),
                     "Access-Control-Max-Age": "600",
                 },
             )

@@ -85,7 +85,5 @@ def test_a_protected_route_does_not_become_readable(app_client):
 def test_no_credentials_header_accompanies_the_wildcard(app_client):
     """`*` is only safe for a credential-less read; pairing it with
     Allow-Credentials would be rejected by browsers and wrong if it were not."""
-    response = app_client.get(
-        "/.well-known/agent-card.json", headers={"Origin": "https://viewer.example"}
-    )
+    response = app_client.get("/.well-known/agent-card.json", headers={"Origin": "https://viewer.example"})
     assert "access-control-allow-credentials" not in {k.lower() for k in response.headers}
