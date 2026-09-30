@@ -394,6 +394,52 @@ def create_app(config: Config, agent=None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # ── Public-read CORS ────────────────────────────────────────────────────
+    #
+    # The keyless public GET documents carry ``Access-Control-Allow-Origin: *``.
+    # They are already open — ``local_auth.OPEN_ROUTES`` declares the card open
+    # because *"a resolver fetches it unauthenticated to learn how to address
+    # this agent"* — but without this header only a SERVER-side resolver could
+    # read them. A browser-based one got the same 200 and was forbidden to look
+    # at it, which made a document published for anyone unreadable by the most
+    # common kind of anyone.
+    #
+    # Measured: a viewer on another origin fetching this agent's card received no
+    # ACAO header at all and could not display its name.
+    #
+    # Scoped to the documents and to safe methods, so ``POST /`` — the A2A
+    # endpoint on the same app, which authenticates its own callers — never
+    # receives the wildcard. The org server carries the same middleware for the
+    # same reason; this is the agent's half of it.
+    _public_docs = frozenset(
+        path for method, path in local_auth.OPEN_ROUTES if method == "GET" and "{" not in path
+    )
+
+    @app.middleware("http")
+    async def public_read_cors(request, call_next):
+        public = request.method in ("GET", "HEAD", "OPTIONS") and request.url.path in _public_docs
+        if public and request.method == "OPTIONS":
+            from starlette.responses import Response as _Response
+
+            return _Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                    "Access-Control-Allow-Headers": request.headers.get(
+                        "access-control-request-headers", "*"
+                    ),
+                    "Access-Control-Max-Age": "600",
+                },
+            )
+        response = await call_next(request)
+        if public:
+            # `*` is correct for a keyless, credential-less read; no
+            # Allow-Credentials is ever set here, so this cannot widen anything
+            # that depends on a cookie or the local token.
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
     # ─── Local Agency Log routes (no server round-trip) ──────
     #
     # The Agency Log is the principal's local store of ARP receipts
