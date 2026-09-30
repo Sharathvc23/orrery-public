@@ -24,6 +24,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 import agent_telemetry
+import env_flags
 import federation_feed
 import member_listing
 import nanda_registry
@@ -167,6 +168,34 @@ def _self_served_card_url(member: dict) -> str | None:
     return f"{endpoint}/.well-known/agent.json"
 
 
+#: Whether an ANONYMOUS caller sees this org's member entries.
+#:
+#: ⚠️ DEFAULTS TO OFF, AND THE DEFAULT IS THE SECURITY DECISION. The member list
+#: was closed to anonymous callers after an audit found a member's free-text
+#: description carrying an email address and a phone number, both reachable by an
+#: unauthenticated GET. Reopening it quietly for every deployment would undo that
+#: without anybody choosing to.
+#:
+#: What changed since, and why opting in is now defensible for an org that wants
+#: to be found: ``_member_catalog_entry`` no longer publishes ``description`` at
+#: all — it is hard-coded to ``""`` — so the field that leaked cannot leave by
+#: this route. What an opted-in org publishes is what ``PUBLICATION_NOTICE``
+#: already tells every registrant is published "to any crawler that resolves this
+#: member's AgentFacts or catalog entry": identifier, name, skills, endpoint. The
+#: org's size is not newly disclosed either; ``GET /health`` already reports
+#: ``members`` to anonymous callers.
+#:
+#: So this is an org-level choice between being discoverable and being private,
+#: made by an operator who can see both. It is not a choice this code should make
+#: for them, and the direction it fails when nobody chooses is closed.
+ORG_PUBLIC_MEMBER_CATALOG_ENV = "ORG_PUBLIC_MEMBER_CATALOG"
+
+
+def publishes_members_publicly() -> bool:
+    """Whether member entries are served to callers with no verified identity."""
+    return env_flags.security_flag(ORG_PUBLIC_MEMBER_CATALOG_ENV, default=False)
+
+
 def _member_catalog_entry(member_id: str, member: dict) -> dict | None:
     """CatalogEntry for an org MEMBER → the A2A card that describes it.
 
@@ -197,6 +226,16 @@ def _member_catalog_entry(member_id: str, member: dict) -> dict | None:
         "displayName": member.get("name", member_id),
         "mediaType": "application/a2a-agent-card+json",
         "url": url,
+        # WHAT THIS MEMBER DOES, so the catalog can be searched rather than only
+        # enumerated. Without it a resolver that has followed the index to this
+        # document learns that N agents exist and nothing about which one to ask
+        # — measured: every org in the public index answered a capability query
+        # with the same undifferentiated result.
+        #
+        # Safe to publish and already disclosed: PUBLICATION_NOTICE tells every
+        # registrant that `skills` is published to "any crawler that resolves
+        # this member's AgentFacts or catalog entry". This is that entry.
+        "tags": [str(s) for s in (member.get("skills") or []) if str(s).strip()][:20],
         # NEVER the member row's ``description``. This is an unauthenticated
         # hop, and that field is member-authored free text — the one an audit
         # found carrying an email address and a phone number, and the one the
@@ -303,11 +342,12 @@ async def ai_catalog(request: Request) -> JSONResponse:
     # KeyError('chapter_agent'). The value is the same one the middleware sets,
     # and only ever on a verified signature.
     caller = getattr(request.state, "agent_id", "") or ""
+    public_members = publishes_members_publicly()
     entries = [_org_catalog_entry()]
     omitted = 0
     withheld = 0
     for member_id, member in ca.members.items():
-        if not caller:
+        if not caller and not public_members:
             withheld += 1
             continue
         entry = _member_catalog_entry(member_id, member)

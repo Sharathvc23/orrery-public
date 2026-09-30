@@ -58,6 +58,12 @@ SKIP_PARTS = ("tests", "_arp_verify", "scripts")
 
 SECURITY_FLAG_REQUIRED: dict[str, str] = {
     "FEDERATION_ENFORCE_SIGNED_BROADCASTS": "Rejects unsigned peer broadcasts. Defaults on.",
+    "ORG_PUBLIC_MEMBER_CATALOG": (
+        "Serves member catalog entries to callers with no verified identity. Defaults OFF: "
+        "the member list was closed after an audit found a free-text description carrying "
+        "an email address and a phone number reachable by an unauthenticated GET. An org "
+        "opts in to being discoverable; nothing opts in on its behalf."
+    ),
     "FEDERATION_REQUIRE_SIGNED_RECORDS": "Rejects unsigned registry records. Defaults on.",
     "ORRERY_REQUIRE_SEALED_SECRETS": "Refuses to boot with secrets unsealed at rest. Defaults on.",
     "KLAVIYO_LIVE_SENDS": "Permits outbound messages to real recipients. Defaults off.",
