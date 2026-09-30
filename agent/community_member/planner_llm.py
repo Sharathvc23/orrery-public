@@ -231,6 +231,24 @@ def _skill_consent_scope(extra: dict[str, Any]) -> str:
 
     skill_id = str(extra.get("skill_id") or "")
     tool_name = str(extra.get("tool_name") or "")
+    if not skill_id or not tool_name:
+        # A skill.invoke naming no skill or no tool is not a proposal, and
+        # must not be turned into a scope that merely LOOKS like one.
+        #
+        # Measured on a live agent: the planner emitted
+        # `skill.invoke` / `::::44136fa355b3678a`, which the gate accepted
+        # because its check is `if not req.scope` and that string is truthy.
+        # A human was then asked to approve an action identifying nothing.
+        #
+        # The consequence is worse than a wasted prompt. Graduation keys on
+        # (device_did, capability, scope, context_sha256), so five approvals
+        # of this scope would become a STANDING auto-approval matching every
+        # future malformed proposal with no skill, no tool and empty args —
+        # a wildcard grant earned by approving what looked like one action.
+        raise ValueError(
+            "skill.invoke requires extra.skill_id and extra.tool_name; "
+            f"got skill_id={skill_id!r} tool_name={tool_name!r}"
+        )
     raw_args = extra.get("args")
     args = raw_args if isinstance(raw_args, dict) else {}
     try:
@@ -282,6 +300,8 @@ def _build_proposal(raw: dict[str, Any]) -> ActionRequest:
     # call's consent granularity match the wrapped capability (e.g.
     # net.http, where scope IS the URL).
     if capability == "skill.invoke":
+        # Raises when the proposal names no skill or tool — the caller drops it
+        # rather than prompting a human about an action nobody can identify.
         scope = _skill_consent_scope(extra)
 
     return ActionRequest(
@@ -295,14 +315,43 @@ def _build_proposal(raw: dict[str, Any]) -> ActionRequest:
     )
 
 
-JSON_MODE_INSTRUCTION = (
-    "Reply with a single JSON object and nothing else. It must have exactly "
-    'two keys: "summary", a one-sentence string, and "proposals", an array of '
-    "objects each with the keys capability, scope, context, provenance, "
-    "source_ref and rationale. Use the same capability names and the same "
-    "provenance values the propose_actions function documents. Emit an empty "
-    "proposals array if there is nothing to propose."
-)
+def _json_mode_instruction() -> str:
+    """The JSON-fallback contract, with `extra` DERIVED from the function schema.
+
+    ⚠️ WHY THIS IS COMPUTED AND NOT A STRING. It used to be a literal that named
+    capability, scope, context, provenance, source_ref and rationale — and never
+    mentioned `extra`. The function-calling schema documented it all along.
+
+    So on a model that falls back to JSON mode, every `skill.invoke` proposal was
+    malformed by construction: the model was never told to send `extra`, and
+    `_skill_consent_scope` builds the ENTIRE scope from it. Measured on a live
+    agent, the result was `skill.invoke` on scope `::::44136fa355b3678a` — an
+    action naming no skill and no tool, which the gate accepted because its check
+    is `if not req.scope` and that string is truthy, and which a human was then
+    asked to approve.
+
+    One contract described in two places, and only one of them kept correct.
+    Deriving the `extra` guidance from the schema is what stops them drifting
+    again; a test asserts the two paths require the same fields.
+    """
+    extra_doc = ""
+    try:
+        props = PROPOSE_ACTIONS_SCHEMA["function"]["parameters"]["properties"]["proposals"]["items"]["properties"]
+        extra_doc = str(props["extra"].get("description", ""))
+    except (KeyError, TypeError):  # pragma: no cover - schema shape is pinned by a test
+        extra_doc = ""
+    return (
+        "Reply with a single JSON object and nothing else. It must have exactly "
+        'two keys: "summary", a one-sentence string, and "proposals", an array of '
+        "objects each with the keys capability, scope, context, provenance, "
+        "source_ref, rationale and extra. Use the same capability names and the "
+        "same provenance values the propose_actions function documents. "
+        + (f"extra: {extra_doc} " if extra_doc else "")
+        + "Emit an empty proposals array if there is nothing to propose."
+    )
+
+
+JSON_MODE_INSTRUCTION = _json_mode_instruction()
 
 
 def _plan_from_arguments(parsed: object, *, extra_calls: int = 0) -> Plan:
@@ -319,11 +368,30 @@ def _plan_from_arguments(parsed: object, *, extra_calls: int = 0) -> Plan:
     if not isinstance(raw_proposals, list):
         return Plan(proposals=(), summary="(LLM did not return a proposals array)")
 
-    proposals = tuple(_build_proposal(p) for p in raw_proposals if isinstance(p, dict))
+    # A proposal this planner cannot build is DROPPED, not fatal.
+    #
+    # `_build_proposal` refuses a skill.invoke that names no skill or tool. Built
+    # inside `tuple(...)` that refusal would abort the whole plan, so one bad
+    # proposal from the model would cost the agent every good one alongside it —
+    # trading a bogus prompt for a dead cycle. The count is carried into the
+    # summary rather than swallowed, because a plan that quietly shrank is
+    # indistinguishable from a model that proposed less.
+    built: list[ActionRequest] = []
+    dropped: list[str] = []
+    for raw_proposal in raw_proposals:
+        if not isinstance(raw_proposal, dict):
+            continue
+        try:
+            built.append(_build_proposal(raw_proposal))
+        except ValueError as exc:
+            dropped.append(str(exc))
+
     summary = str(parsed.get("summary", ""))
     if extra_calls:
         summary += f" [{extra_calls} additional tool calls ignored]"
-    return Plan(proposals=proposals, summary=summary)
+    if dropped:
+        summary += f" [{len(dropped)} unbuildable proposal(s) dropped: {'; '.join(dropped)[:200]}]"
+    return Plan(proposals=tuple(built), summary=summary)
 
 
 def _first_message(response: object) -> object:
