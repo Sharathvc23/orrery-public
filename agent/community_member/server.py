@@ -6,6 +6,7 @@ Local routes expose agent state and require the local API token; see local_auth.
 No HTML is served from this module.
 """
 
+import contextlib
 import json
 import logging
 import time
@@ -380,7 +381,24 @@ def create_app(config: Config, agent=None) -> FastAPI:
         # NANDA_INDEX_V3_URL is set: an agent should not publish itself to a
         # third party because it happened to start. Never fatal — see index_boot.
         announce_to_index(_config)
-        yield
+
+        # ⚠️ AND KEEP IT. A v3 record lives three days; announcing once at
+        # startup meant the name lapsed on the fourth day and every counterparty
+        # requiring an index-resolvable caller began refusing this agent.
+        # Started here rather than in the think loop because staying findable is
+        # not conditional on having work to do: an idle or keyless agent still
+        # has to be resolvable.
+        import asyncio
+
+        from .index_boot import renew_forever
+
+        renewal = asyncio.ensure_future(renew_forever(_config))
+        try:
+            yield
+        finally:
+            renewal.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await renewal
 
     app = FastAPI(title=f"@{config.agent_id} Dashboard", docs_url=None, redoc_url=None, lifespan=_lifespan)
     # Every route requires the local token unless local_auth.OPEN_ROUTES

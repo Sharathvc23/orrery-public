@@ -86,3 +86,58 @@ def announce_to_index(config) -> dict | None:
     )
     log.info("index v3: %s %s", result.get("action"), result.get("id", ""))
     return result
+
+
+# ── keeping the name, not just claiming it ──────────────────────────────────
+
+#: How often to re-check the registration. A v3 record lives three days and
+#: ``ensure_registered`` renews inside the last twelve hours, so hourly is far
+#: more often than strictly needed — and that is the point: a tick that only just
+#: keeps up has no margin for the hours an index is unreachable, and the check
+#: costs one resolve when nothing is due.
+RENEW_INTERVAL_SECONDS = 3600.0
+
+
+async def renew_forever(config, *, interval: float = RENEW_INTERVAL_SECONDS, sleep=None) -> None:
+    """Re-announce on a clock, forever.
+
+    ⚠️ WITHOUT THIS THE NAME LAPSES AND THE AGENT STOPS BEING A PEER.
+
+    A v3 record lives three days and ``announce_to_index`` ran once, at startup.
+    So an agent stayed resolvable for exactly as long as it had been running, and
+    on the fourth day its name expired — at which point a counterparty that
+    requires an index-resolvable caller refuses it. Measured on the live estate:
+    every record expired within 61 hours of being read, and the only reason
+    nothing had broken was that deploys kept restarting the clock.
+
+    ``announce_to_index`` already knows the whole rule — it resolves first,
+    renews only when the record is close to lapsing, and returns ``current``
+    otherwise. The log is append-only, so an agent that re-registered every tick
+    would write a run of identical entries into a history nobody can edit. This
+    supplies the clock and nothing else.
+
+    Never raises. An index that is down is somebody else's outage, and turning it
+    into this agent's crash would take the agent off the air for the one reason
+    renewal exists to prevent.
+    """
+    import asyncio
+
+    nap = sleep or asyncio.sleep
+    while True:
+        await nap(interval)
+        try:
+            result = await asyncio.to_thread(announce_to_index, config)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - an outage is not a crash
+            log.warning("[index] renewal could not reach the index: %s", exc)
+            continue
+        if result is None:
+            continue
+        action = result.get("action")
+        if action in ("renewed", "registered"):
+            # The moment the agent would otherwise have lapsed. An operator
+            # reading logs should be able to see that it did not.
+            log.info("[index] %s seq=%s expires=%s", action, result.get("seq"), result.get("expires_at"))
+        elif action not in ("current", "skipped"):
+            log.warning("[index] renewal %s: %s", action, str(result.get("detail", ""))[:200])
