@@ -24,13 +24,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 import agent_telemetry
+import env_flags
 import federation_feed
 import member_listing
 import nanda_registry
 import sovereign_identity
 import think_cycle
 from routes import ca
-import env_flags
 
 router = APIRouter()
 
