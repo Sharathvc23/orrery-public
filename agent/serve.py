@@ -51,6 +51,39 @@ def _resolve_port() -> int:
     return DASHBOARD_PORT
 
 
+def report_index_announce(config) -> dict | None:
+    """Claim this agent's index name, and SAY WHAT HAPPENED.
+
+    `create_app`'s lifespan already calls `announce_to_index`, and its outcome
+    goes to `log.info` — which uvicorn's log config does not surface, so on a
+    real deploy the result was invisible. An agent that silently did not register
+    looks identical to one that did, and the only symptom is a counterparty
+    refusing it later for a reason that points somewhere else entirely.
+
+    Idempotent: `ensure_registered` resolves before writing, so being called
+    from both here and the lifespan claims nothing twice. Never fatal — an
+    agent that cannot register is still an agent.
+    """
+    if not os.environ.get("NANDA_INDEX_V3_URL", "").strip():
+        # "Off" and "silent" are different facts, and an operator debugging a
+        # refusal needs to know which one they are looking at.
+        print("[serve] index v3 → off (NANDA_INDEX_V3_URL unset)", flush=True)
+        return None
+    try:
+        from community_member.index_boot import announce_to_index
+
+        outcome = announce_to_index(config)
+        print(f"[serve] index v3 → {outcome}", flush=True)
+        return outcome
+    except Exception as exc:  # noqa: BLE001 — loud, keep serving
+        print(
+            f"[serve] index v3 registration failed (still serving): {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return {"action": "failed", "detail": f"{type(exc).__name__}: {exc}"}
+
+
 def _build_config() -> Config:
     """Load (disk) → overlay env → restore the persisted identity → save.
 
@@ -168,6 +201,19 @@ def main() -> int:
             print(
                 f"[serve] join_chapter failed (still serving): {type(exc).__name__}: {exc}", file=sys.stderr, flush=True
             )
+
+    # Claim this agent's index name, and SAY WHAT HAPPENED.
+    #
+    # `create_app`'s lifespan already calls this, and its outcome goes to
+    # `log.info` — which uvicorn's log config does not surface, so on a real
+    # deploy the result was invisible. An agent that silently does not register
+    # looks identical to one that did, and the only symptom is a counterparty
+    # refusing it later for a reason that points at the wrong thing.
+    #
+    # Reported here the way every other boot step reports, and idempotent:
+    # `ensure_registered` resolves before writing, so calling it twice claims
+    # nothing twice.
+    report_index_announce(config)
 
     # Think-loop cadence. 300s is the production default; the override
     # exists so live-process tests (tests/e2e/) can drive full
