@@ -51,6 +51,51 @@ def _resolve_port() -> int:
     return DASHBOARD_PORT
 
 
+def apply_pack_env() -> list[str]:
+    """Install the skill packs this deployment names, and report what is active.
+
+    ``AGENT_PACKS=hospitality,team``
+
+    WHY THIS EXISTS. A pack's installed state lives in ``packs.json`` on the
+    agent's volume, and nothing seeded it from the deployment — so the only way
+    to give a remote agent a capability was to reach into its volume by hand.
+    That makes a fleet unreproducible: a fresh deploy of the same service comes
+    up without the capabilities its predecessor had, and nothing says so.
+
+    This is the same contract ``AGENT_SKILLS`` already has. Skills describe what
+    an agent claims; packs decide which tools it actually holds. Both now come
+    from the deployment.
+
+    ADDITIVE, deliberately. It installs and never uninstalls, because an
+    operator who added a pack through the dashboard should not have it removed
+    by an unrelated redeploy. The trade is that env is not the whole truth, so
+    the effective set is printed rather than assumed.
+
+    A named pack that does not exist is reported loudly. A typo here is an agent
+    that comes up quietly unable to do its job, which is the failure mode worth
+    the noise.
+    """
+    from community_member import skill_runtime
+
+    wanted = [p.strip() for p in os.environ.get("AGENT_PACKS", "").split(",") if p.strip()]
+    if wanted:
+        known = set(skill_runtime.load_pack_manifests())
+        for pack_id in wanted:
+            if pack_id not in known:
+                print(
+                    f"[serve] pack {pack_id!r} is not a known pack — this agent will NOT have its "
+                    f"tools. Known: {', '.join(sorted(known))}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            skill_runtime.set_pack_installed(pack_id, True)
+
+    active = sorted(skill_runtime.active_pack_skill_dirs())
+    print(f"[serve] skill packs → requested={wanted or '(none)'} active_skills={active}", flush=True)
+    return active
+
+
 def report_index_announce(config) -> dict | None:
     """Claim this agent's index name, and SAY WHAT HAPPENED.
 
@@ -213,6 +258,10 @@ def main() -> int:
     # Reported here the way every other boot step reports, and idempotent:
     # `ensure_registered` resolves before writing, so calling it twice claims
     # nothing twice.
+    # Packs before anything reads the tool set: an agent that registers and
+    # starts thinking before its capabilities are installed advertises less than
+    # it has.
+    apply_pack_env()
     report_index_announce(config)
 
     # Think-loop cadence. 300s is the production default; the override
