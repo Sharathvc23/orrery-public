@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from rich.console import Console
 
-from . import llm_client, retry_policy
+from . import llm_client, llm_runtime, retry_policy
 from .a2a_client import A2AClient
 from .config import Config
 
@@ -1393,6 +1393,24 @@ class LocalAgent:
         while self.running:
             # Reset each cycle: only a fully-refused cycle widens it.
             this_interval = interval
+            # ⚠️ THE PER-CYCLE LLM BUDGET IS RESET HERE BECAUSE NOTHING RESET IT.
+            #
+            # ``llm_runtime.CYCLE_BUDGET`` is module-level and its own comment says
+            # it is "reset at the top of each cycle by the caller that owns the
+            # cycle". No caller did — in either tree. So the bound was never
+            # per-cycle at all: it was a PROCESS-LIFETIME cap of 60 calls, and
+            # every long-running agent stopped reasoning permanently once it had
+            # made them. Measured on 2026-09-30: all ten live agent services and
+            # both org servers answered every LLM-mediated request with
+            # "this cycle has made 60 LLM calls, its limit" — while the message
+            # promised "Remaining work is not lost — it is left for the next
+            # cycle." There was no next cycle. The reassurance was the bug's
+            # best disguise.
+            #
+            # This is the cycle boundary: the one place that knows a cycle has
+            # begun. The limit is re-read rather than reused so an operator can
+            # change ``LLM_MAX_CALLS_PER_CYCLE`` without a redeploy.
+            llm_runtime.CYCLE_BUDGET.reset(llm_runtime.calls_per_cycle())
             self._drain_inbound()
             if v2:
                 try:

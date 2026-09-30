@@ -180,9 +180,16 @@ EXPENSIVE_WRITE_LIMITS: dict[str, int] = {
     # call. An anonymous caller had the larger allowance on the cheaper-to-abuse
     # endpoint.
     #
-    # The per-cycle LLM budget (llm_runtime.CYCLE_BUDGET) does NOT cover this:
-    # it bounds the autonomous think loop and is reset by the cycle owner, while
-    # this is request-driven and never enters that path.
+    # The per-cycle LLM budget (llm_runtime.CYCLE_BUDGET) DOES cover this, and
+    # this comment said the opposite until 2026-09-30. There is ONE module-level
+    # budget and every client the factory hands out shares it, so a request-driven
+    # LLM call spends the same allowance the autonomous think loop spends. That is
+    # measurable from outside: a burst of external /a2a requests can exhaust the
+    # cycle's allowance and the think loop then finds nothing left, and vice versa.
+    # Kept as one budget deliberately — it bounds what this PROCESS sends a
+    # provider per cycle, which is the thing a rate limit is against — but said
+    # accurately, because "never enters that path" is how the exhaustion looked
+    # like somebody else's problem from both sides.
     #
     # ⚠️ This is a RATE limit, not a SPEND cap. It slows one source; it does not
     # bound total cost, because the window is per-source and per-process. A
