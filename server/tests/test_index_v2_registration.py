@@ -87,10 +87,11 @@ def test_agents_record_case_insensitive_match(client: TestClient) -> None:
 
 
 def test_agents_record_aliases_org_domain_and_org_id(client: TestClient, monkeypatch) -> None:
-    """A resolver hands hop-2 the agent_id, the org_id, OR the org DOMAIN (for an
-    org-level urn:ai:domain:<DOM> locator with no :agent: slug). All three must
-    return the SAME primary-agent CatalogEntry — else the live NANDA UI 404s
-    (/agents/<domain> and /agents/<org_id> were 404-ing)."""
+    """A resolver hands hop-2 the agent_id, the org_id, or the org DOMAIN. All
+    must return the SAME primary-agent CatalogEntry — else the live NANDA UI
+    404s (/agents/<domain> and /agents/<org_id> were 404-ing). The Index's own
+    short-name is covered separately, in
+    ``test_agents_record_answers_the_air_catalog_short_name``."""
     monkeypatch.setenv("INDEX_ORG_ID", "orrery-demo")  # org_id distinct from agent_id
     domain = "demo-org.example"  # host of _PUBLIC_URL
 
@@ -103,6 +104,28 @@ def test_agents_record_aliases_org_domain_and_org_id(client: TestClient, monkeyp
     # identical CatalogEntry for every alias (always the primary agent).
     assert by_agent.json() == by_domain.json() == by_org_id.json()
     assert by_domain.json()["identifier"] == _AGENT_ID
+
+
+def test_agents_record_answers_the_air_catalog_short_name(client: TestClient) -> None:
+    """REGRESSION, measured live 2026-10-11. The Index keys entries on
+    ``urn:air:<FQDN>:<namespace...>:<short-name>`` and ``/resolve`` hands this hop
+    the SHORT-NAME alone. Orrery registers with ``hosting_path=registry``, so its
+    entry is ``urn:air:<ORG_DOMAIN>:catalog:root`` and every org-level resolve
+    arrives as ``root``.
+
+    It arrived as ``root`` and this registry answered 404, which broke the live
+    4-hop end to end: ``urn:air:regentix.ai:catalog:root`` resolved at the Index,
+    then died on ``GET /agents/root``. None of the other aliases are sent any
+    more — the bare-domain locator the old scheme allowed has no ARD form — so
+    this one is the whole chain."""
+    # Imported here, not at module scope: the chapter_agent fixture drops
+    # `routes` from sys.modules, so a top-level import would bind the stale one.
+    from routes import identity
+
+    assert identity.AIR_CATALOG_SHORT_NAME == "root"
+    by_short_name = client.get(f"/agents/{identity.AIR_CATALOG_SHORT_NAME}")
+    assert by_short_name.status_code == 200, by_short_name.text
+    assert by_short_name.json() == client.get(f"/agents/{_AGENT_ID}").json()
 
 
 def test_agents_record_unknown_id_404(client: TestClient) -> None:

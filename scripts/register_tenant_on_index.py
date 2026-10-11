@@ -46,7 +46,7 @@ USAGE::
     scripts/register_tenant_on_index.py --tenant-card-url ... --register
 
     # prove an existing listing still resolves — read-only, no credential
-    scripts/register_tenant_on_index.py --confirm urn:ai:domain:example.com:agent:bobs
+    scripts/register_tenant_on_index.py --confirm urn:air:example.com:agent:bobs
 """
 
 from __future__ import annotations
@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
     _say("card served by", advertised)
     _say("tenant did", record["trust_manifest"]["identity"] or "(none — the card names no key)")
-    _say("URN it would resolve at", record["identifier"])
+    _say("URN it would resolve at", registrar.derived_identifier(record) or "(none — no domain/org_id)")
     _say_attestation(attestation_copy.attestation_of(record))
     print()
 
@@ -320,19 +320,24 @@ def _register(client: registrar.IndexRegistrarClient, record: dict) -> int:
     result = client.create_org(record)
     _say("write status", f"{result['status']} (this proves nothing on its own)")
     _say("org_id", result["org_id"])
+    # The index MINTS the identifier (anchored to the domain it verified) and
+    # returns it on the write. Prefer that over recomputing ours: if the two ever
+    # disagree, the index's is the one a stranger resolves.
+    assigned = result.get("response") if isinstance(result.get("response"), dict) else {}
+    identifier = str(assigned.get("identifier") or "") or registrar.derived_identifier(record)
+    _say("identifier the index assigned", identifier or "(the write returned none)")
     print()
     print("── the only thing that counts: does it resolve? ──────────────")
-    found = registrar.confirm_by_resolve(record)
+    found = registrar.confirm_by_resolve(record, identifier=identifier)
     issues = registrar.confirmation_problems(record, found)
     _say("resolve", "OK" if found.ok else f"REFUSED — {found.reason}")
     if found.ok:
         _say("endpoint", found.endpoint)
         _say("did on the card", found.did or "(none)")
         # Read back off what the index returned, not off the record we sent: the
-        # question here is what a stranger resolving this business is told, and
-        # the catalog_metadata -> metadata mapping is still an inference. If the
-        # field did not survive the write, this says so instead of echoing our
-        # own intent back at us.
+        # question here is what a stranger resolving this business is told. If
+        # the field did not survive the write, this says so instead of echoing
+        # our own intent back at us.
         _say_attestation(found.owner_attestation)
     if issues:
         print("\nNOT LISTED AS INTENDED:", file=sys.stderr)

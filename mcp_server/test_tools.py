@@ -276,7 +276,9 @@ def test_verify_receipt_needs_no_identity_of_its_own(tmp_path: Path) -> None:
 
 
 def test_resolve_peer_reports_a_named_reason_for_an_unreachable_index() -> None:
-    result = tools.resolve_peer("urn:ai:email:nobody@example.invalid", index="https://index.invalid.test")
+    result = tools.resolve_peer(
+        "urn:air:host39.org:personal:nobody@example.invalid", index="https://index.invalid.test"
+    )
     assert result["ok"] is False
     assert result["reason"]
 

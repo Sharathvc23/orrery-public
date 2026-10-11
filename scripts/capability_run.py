@@ -9,7 +9,7 @@ when available and degrades honestly when not.
 
 Point it at any Orrery org — your own ``./orrery-up``, or a public demo mesh.
 The org URL is REQUIRED (arg 1 or ``$ORRERY_ORG_URL``). Set ``$CAPABILITY_LOCATOR``
-(``urn:ai:domain:<org>:agent:<id>``) to exercise the public NANDA Index 4-hop
+(``urn:air:<org-domain>:agent:<id>``) to exercise the public NANDA Index 4-hop
 resolve; ``$NANDA_INDEX_URL`` overrides the index endpoint.
 """
 
@@ -68,7 +68,7 @@ if LOCATOR:
 else:
     say(
         "1 NANDA 4-hop resolve",
-        "skipped — set $CAPABILITY_LOCATOR=urn:ai:domain:<org>:agent:<id> "
+        "skipped — set $CAPABILITY_LOCATOR=urn:air:<org-domain>:agent:<id> "
         "to resolve via the public index",
     )
 

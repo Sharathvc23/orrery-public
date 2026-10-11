@@ -60,10 +60,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: The record key the value is published under. ``index_registrar`` writes it as
-#: a literal inside a dict and exports no constant, so it is restated here; the
-#: test asserts the two spellings agree against the record that module builds.
-ATTESTATION_KEY = "org.projectnanda.ownerAttestation"
+#: The AI Catalog extension namespace the convention lives under, and the field
+#: name inside it. ``index_registrar`` writes them as literals inside a dict and
+#: exports no constant, so they are restated here; the test asserts the spellings
+#: agree against the record that module builds.
+#:
+#: The flat ``org.projectnanda.ownerAttestation`` form this once held is not a
+#: legal key any more — the index nests the convention as
+#: ``extensions = {"org.projectnanda": {"ownerAttestation": ...}}``.
+EXTENSION_NAMESPACE = "org.projectnanda"
+ATTESTATION_KEY = "ownerAttestation"
 
 #: What a reader is shown when the record carries no attestation at all — key
 #: missing, or present and empty. Not a member of the vocabulary: it is what
@@ -245,19 +251,22 @@ def vocabulary() -> tuple[str, ...]:
 def attestation_of(record: dict) -> str | None:
     """The attestation an index record carries, or ``None`` if it carries none.
 
-    ⚠️ ``catalog_metadata`` ON WRITE, ``metadata`` ON READ. The pairing is an
-    inference recorded in ``index_registrar`` and not yet confirmed against a
-    live read-back, so both names are looked at. A reader that knew only one of
-    them would report the field ABSENT for a record that states its attestation
-    under the other — the value read as unverified because of a key name.
+    One name on both sides now: the convention is written and read as
+    ``extensions["org.projectnanda"]["ownerAttestation"]``. The old asymmetry —
+    ``catalog_metadata`` on write, ``metadata`` on read, a pairing that could
+    only be inferred — is gone, and with it the reason this function had to look
+    under two keys and the risk that a record read as unattested because of a
+    key name.
 
     Returns the raw string. It is a third party's data and is not validated
     here: deciding what an unknown value means is :func:`rendering_for`'s job,
     and dropping one silently would erase the fact that something was stated.
     """
-    for key in ("metadata", "catalog_metadata"):
-        bag = record.get(key)
-        if isinstance(bag, dict) and ATTESTATION_KEY in bag:
-            found = bag[ATTESTATION_KEY]
-            return found if isinstance(found, str) else None
-    return None
+    extensions = record.get("extensions")
+    if not isinstance(extensions, dict):
+        return None
+    bag = extensions.get(EXTENSION_NAMESPACE)
+    if not isinstance(bag, dict) or ATTESTATION_KEY not in bag:
+        return None
+    found = bag[ATTESTATION_KEY]
+    return found if isinstance(found, str) else None

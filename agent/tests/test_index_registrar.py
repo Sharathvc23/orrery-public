@@ -46,24 +46,31 @@ def _record(**overrides):
 def test_the_urn_names_who_vouched_and_the_trust_manifest_names_who_signs():
     """The barber does not own our domain. The record must not imply they do:
     the publisher is the host operator's verified domain, and the tenant's key
-    appears only as the identity that signs its receipts."""
+    appears only as the identity that signs its receipts.
+
+    The identifier is no longer ours to send — the index derives it from the
+    domain it verified — so what is asserted here is that the derivation lands
+    on our domain, and that the only publisher field we still send is a display
+    name. Sending ``publisher.identifier`` would be a claim a client may not
+    make: the index sets it to the bare verified domain itself."""
     record = _record()
-    assert record["identifier"] == f"urn:ai:domain:{DOMAIN}:agent:stellar-barbers"
-    assert record["publisher"]["identifier"] == f"urn:ai:domain:{DOMAIN}"
-    assert record["publisher"]["identityType"] == "dns"
+    assert "identifier" not in record
+    assert registrar.derived_identifier(record) == f"urn:air:{DOMAIN}:agent:stellar-barbers"
+    assert record["publisher"] == {"displayName": DOMAIN}
     assert record["trust_manifest"] == {"identity": DID, "identityType": "did"}
 
 
 def test_each_business_gets_its_own_urn_under_one_domain():
-    """The reason for the domain path over the email path: production email
-    records are a bare ``urn:ai:email:<addr>``, so a second business under one
-    address collides — and a live collision exists, where resolve silently
-    returns one of two."""
+    """The reason for the domain path over the personal one: a personal record is
+    anchored to the card host and named after the account email
+    (``urn:air:host39.org:personal:<email>``), so a second business under one
+    address collides. Under our own domain each business is its own short-name."""
     urns = {
-        _record(business_name=name, tenant_id=name)["identifier"]
+        registrar.derived_identifier(_record(business_name=name, tenant_id=name))
         for name in ("Stellar Barbers", "Copperleaf Dental", "Harbour Yoga")
     }
     assert len(urns) == 3
+    assert all(u.startswith(f"urn:air:{DOMAIN}:agent:") for u in urns)
 
 
 def test_the_card_is_the_target_so_no_registry_surfaces_are_promised():
@@ -74,17 +81,24 @@ def test_the_card_is_the_target_so_no_registry_surfaces_are_promised():
     record = _record()
     assert record["media_type"] == registrar.MEDIA_A2A_CARD
     assert record["registry_url"] == CARD_URL
-    assert record.get("hosting_path") is None
+    assert record["hosting_path"] == "smb"
 
 
-def test_hosting_path_is_omitted_rather_than_guessed():
-    """It is write-only — absent from every read schema and from all 251 live
-    records — so no value's effect can be observed. ``personal`` is documented to
-    activate by EMAIL, which is the activation we do not want. Sending nothing
-    makes no claim; it stays overridable for when a write settles it."""
-    assert registrar.HOSTING_PATH is None
-    assert "hosting_path" not in _record()
-    assert _record(hosting_path="smb")["hosting_path"] == "smb"
+def test_hosting_path_says_smb_because_that_is_what_this_registers():
+    """It was omitted while its effect was unobservable. The index has since
+    published what each path does: ``smb`` anchors the identifier to our domain
+    and stamps ``resolutionRole: smb-agent-card`` / ``preferredDiscovery:
+    nandaindex`` — the two values this record used to assert by hand. So the
+    claim did not change, only the field that carries it.
+
+    ``personal`` is still the one we must not send: it anchors the identifier to
+    the card host instead of our domain."""
+    assert registrar.HOSTING_PATH == "smb"
+    assert _record()["hosting_path"] == "smb"
+    assert _record(hosting_path="registry")["hosting_path"] == "registry"
+    nanda = _record()["extensions"]["org.projectnanda"]
+    assert "resolutionRole" not in nanda, "server-owned — the index derives it from hosting_path"
+    assert "preferredDiscovery" not in nanda
 
 
 # ── refuse before the write, not after ───────────────────────────────────────
@@ -144,18 +158,46 @@ def test_a_record_that_resolves_but_lost_the_did_is_reported_as_not_listed():
     assert any("trust_manifest.identity" in p for p in problems), problems
 
 
-def test_the_inferred_catalog_metadata_mapping_is_reported_when_it_is_wrong():
-    """``catalog_metadata`` on write, ``metadata`` on read: the pairing is an
-    inference and is stated as one. If it is wrong, the check says so rather
-    than the convention silently vanishing."""
+def test_convention_keys_dropped_by_the_write_are_reported():
+    """The convention is written and read under one name now
+    (``extensions["org.projectnanda"]``), but a key the index drops is still the
+    failure that matters — an attestation that did not survive reads as a
+    business nobody checked."""
     record = _record()
     found = nanda_index.Discovery(
         ok=True,
         reason="ok",
-        record={"registry_url": CARD_URL, "trust_manifest": record["trust_manifest"], "metadata": None},
+        record={
+            "org_id": record["org_id"],
+            "registry_url": CARD_URL,
+            "trust_manifest": record["trust_manifest"],
+            "extensions": {"org.projectnanda": {}},
+        },
         did=DID,
     )
-    assert any("catalog_metadata -> metadata" in p for p in registrar.confirmation_problems(record, found))
+    problems = registrar.confirmation_problems(record, found)
+    assert any("did not survive" in p and "ownerAttestation" in p for p in problems), problems
+
+
+def test_a_publisher_match_is_not_our_record():
+    """When no entry holds our identifier the index answers with the PUBLISHER's
+    own entry — a 200 describing a different agent. For an a2a-agent-card record
+    that is a wrong answer dressed as a right one, so it is named."""
+    record = _record()
+    found = nanda_index.Discovery(
+        ok=True,
+        reason="ok",
+        match="publisher",
+        record={
+            "org_id": "someone-elses-org",
+            "registry_url": CARD_URL,
+            "trust_manifest": record["trust_manifest"],
+            "extensions": record["extensions"],
+        },
+        did=DID,
+    )
+    problems = registrar.confirmation_problems(record, found)
+    assert any("PUBLISHER" in p for p in problems), problems
 
 
 def test_a_refused_resolve_is_the_whole_answer():
@@ -172,9 +214,10 @@ def test_a_clean_confirmation_has_no_problems():
         ok=True,
         reason="ok",
         record={
+            "org_id": record["org_id"],
             "registry_url": CARD_URL,
             "trust_manifest": record["trust_manifest"],
-            "metadata": dict(record["catalog_metadata"]),
+            "extensions": {"org.projectnanda": dict(record["extensions"]["org.projectnanda"])},
         },
         did=DID,
     )
@@ -276,7 +319,7 @@ def test_smb_host_imports_neither_the_registrar_nor_discovery():
 # authorised by control of the business's own domain were byte-identical in that
 # respect.
 
-ATTESTATION_KEY = "org.projectnanda.ownerAttestation"
+ATTESTATION_KEY = "ownerAttestation"
 
 
 def test_every_record_carries_an_owner_attestation():
@@ -290,8 +333,8 @@ def test_every_record_carries_an_owner_attestation():
     from community_member import owner
 
     for record in (_record(), _record(service_type=None), _record(version="0.9.0"), _record(hosting_path=None)):
-        assert ATTESTATION_KEY in record["catalog_metadata"]
-        assert record["catalog_metadata"][ATTESTATION_KEY] == owner.OWNER_OPERATOR_VOUCHED
+        assert ATTESTATION_KEY in record["extensions"]["org.projectnanda"]
+        assert record["extensions"]["org.projectnanda"][ATTESTATION_KEY] == owner.OWNER_OPERATOR_VOUCHED
 
 
 def test_no_caller_can_set_the_attestation():
@@ -335,7 +378,7 @@ def test_no_caller_can_set_the_attestation():
     assert verdict.evidence_type == "domain_control"
 
     record = _record(grant_verdict=verdict)
-    assert record["catalog_metadata"][ATTESTATION_KEY] == owner.OWNER_OPERATOR_VOUCHED
+    assert record["extensions"]["org.projectnanda"][ATTESTATION_KEY] == owner.OWNER_OPERATOR_VOUCHED
 
 
 def test_the_operators_domain_is_never_read_as_the_businesss():
@@ -349,6 +392,6 @@ def test_the_operators_domain_is_never_read_as_the_businesss():
     from community_member import owner
 
     record = _record()
-    assert record["publisher"]["identifier"] == f"urn:ai:domain:{DOMAIN}"
-    assert record["identifier"].startswith(f"urn:ai:domain:{DOMAIN}:agent:")
-    assert record["catalog_metadata"][ATTESTATION_KEY] != owner.OWNER_DOMAIN_VERIFIED
+    assert record["publisher"] == {"displayName": DOMAIN}
+    assert registrar.derived_identifier(record).startswith(f"urn:air:{DOMAIN}:agent:")
+    assert record["extensions"]["org.projectnanda"][ATTESTATION_KEY] != owner.OWNER_DOMAIN_VERIFIED

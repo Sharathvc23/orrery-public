@@ -67,8 +67,9 @@ discarded. A binding carrying both block types is decided by list order.
 (`agent/community_member/index_registrar.py:205`) already separates two claims,
 deliberately and correctly:
 
-- `publisher.identifier: urn:ai:domain:<domain>` — who vouched, the operator's
-  verified domain, `identityType: "dns"`.
+- `publisher.identifier: <domain>` — who vouched, the operator's verified
+  domain, `identityType: "dns"`. The index sets both from the domain it
+  verified; the record only sends `publisher.displayName`.
 - `trust_manifest.identity: did:key:…` — who signs, the tenant.
 
 There is no third field for **how the business itself was verified**, so a record
@@ -116,7 +117,8 @@ identity the evidence anchors relative to the business being listed.
 
 - `domain_verified` requires that the domain proven in the `_DOMAIN_CONTROL`
   block is the business's own. Under the current identifier scheme
-  (`urn:ai:domain:<operator-domain>:agent:<slug>`, `index_registrar.py:208`) the
+  (`urn:air:<operator-domain>:agent:<slug>`, derived by the index from the
+  domain it verified) the
   domain in the identifier is always the operator's, so **`domain_verified` is
   not derivable for any tenant today.** That is a true statement about where the
   code is, and the implementation should produce `operator_vouched` rather than
@@ -131,17 +133,16 @@ means evidence exists, is valid, and anchors the operator.
 
 ### Where the statement lives
 
-`catalog_metadata`, under the `org.projectnanda.*` convention the record already
-uses (`index_registrar.py:224`):
+`extensions`, under the `org.projectnanda` namespace the record already uses:
 
 ```
-"org.projectnanda.ownerAttestation": "operator_vouched"
+"extensions": {"org.projectnanda": {"ownerAttestation": "operator_vouched"}}
 ```
 
-This requires no change to the index schema, which we do not control. The
-existing caveat on that field applies unchanged: the `catalog_metadata` →
-`metadata` read/write pairing is an inference, and the post-registration check
-reports whether the keys survived rather than assuming they did.
+This requires no change to the index schema, which we do not control. The write
+and read names are the same name — the earlier `catalog_metadata` → `metadata`
+asymmetry, and the inference it forced, are gone — and the post-registration
+check still reports whether the keys survived rather than assuming they did.
 
 ### The default is the weakest honest value
 
