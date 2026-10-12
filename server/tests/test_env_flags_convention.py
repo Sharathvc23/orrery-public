@@ -112,6 +112,12 @@ SECURITY_RELEVANT_VALUE: dict[str, str] = {
     "ORG_ADMIN_TOKEN": "Admin bearer credential. Empty never verifies; a token is generated if unset.",
     "CHAPTER_ADMIN_TOKEN": "Back-compat alias of ORG_ADMIN_TOKEN.",
     "METRICS_BEARER_TOKEN": "Bearer credential for /metrics. Unset serves the endpoint unauthenticated.",
+    "NANDA_INDEX_WRITE_TOKEN": (
+        "Bearer credential presented on index WRITES (create, refresh, withdraw). Unset sends no "
+        "Authorization header, which is correct against an index whose writes are open; an index "
+        "that authenticates them then refuses ours, which is a publication failure and not an "
+        "access-control hole here. Never sent on a read."
+    ),
     "ORRERY_KEY_SECRET": "Key-encryption secret. Absence is refused at boot by ORRERY_REQUIRE_SEALED_SECRETS.",
     "ORRERY_KEY_SECRET_PREVIOUS": (
         "The key-encryption secret being rotated out. Read-only: values sealed under it still "

@@ -6,6 +6,9 @@ Handles multi-registry publication:
 - NANDA Index — production global discovery layer (env NANDA_INDEX_URL)
 - Additional registries — comma-separated in NANDA_INDEX_URL
 
+Index WRITES may require a bearer token (env NANDA_INDEX_WRITE_TOKEN). Reads
+never do. See :func:`_index_write_headers`.
+
 If NANDA_INDEX_URL is empty, only NEST is used (backward compatible).
 All Index URLs are tried in parallel; failure of one does not block
 others or NEST.
@@ -89,6 +92,31 @@ def get_registry_status() -> dict:
             for url in _index_urls
         ],
     }
+
+
+#: Env var holding the bearer token an index requires on writes.
+WRITE_TOKEN_ENV = "NANDA_INDEX_WRITE_TOKEN"
+
+
+def _index_write_headers() -> dict[str, str]:
+    """Auth for a WRITE to a NANDA Index, or no header when none is configured.
+
+    An index may authenticate its writes. The lean index does: with no token
+    configured on ITS side it answers 503 ("cannot authenticate writes"), and
+    with one it answers 401 to a request that presents nothing. Both are
+    correct, and both are indistinguishable from "the index is down" to a
+    client that never had a token to send — which is how three orgs' records sat
+    frozen in a reachable index while /health reported http_503 on a loop.
+
+    Absent token means no header, which is exactly today's behaviour against an
+    index whose writes are open. So this is safe to ship before the token is
+    set anywhere, and the token can then be turned on one service at a time.
+
+    Reads are never authenticated: discovery is public, and sending a secret on
+    a GET would widen where it can leak for no benefit.
+    """
+    token = os.environ.get(WRITE_TOKEN_ENV, "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def _attest(subject_id: str, endpoint: str) -> dict | None:
@@ -179,7 +207,9 @@ async def _register_on_one_index(index_url: str, agent_id: str, facts: dict) -> 
         if attestation:
             payload["attestation"] = attestation
         async with httpx.AsyncClient() as client:
-            resp = await client.post(f"{index_url}/api/agents", json=payload, timeout=10.0)
+            resp = await client.post(
+                f"{index_url}/api/agents", json=payload, headers=_index_write_headers(), timeout=10.0
+            )
             if resp.status_code < 300:
                 _update_status(f"index:{index_url}", True, "registered")
                 print(f"[NandaRegistry] Index registered on {index_url}: {agent_id}")
@@ -187,6 +217,7 @@ async def _register_on_one_index(index_url: str, agent_id: str, facts: dict) -> 
             resp2 = await client.put(
                 f"{index_url}/api/agents/{agent_id}",
                 json=payload,
+                headers=_index_write_headers(),
                 timeout=10.0,
             )
             if resp2.status_code < 300:
@@ -244,6 +275,7 @@ async def update_index_entry(agent_id: str, facts: dict) -> bool:
                 resp = await client.put(
                     f"{url}/api/agents/{agent_id}",
                     json=update_body,
+                    headers=_index_write_headers(),
                     timeout=10.0,
                 )
             ok = resp.status_code < 300
@@ -270,7 +302,7 @@ async def unregister_from_index(agent_id: str) -> bool:
     async def _delete(url: str) -> bool:
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.delete(f"{url}/api/agents/{agent_id}", timeout=5.0)
+                resp = await client.delete(f"{url}/api/agents/{agent_id}", headers=_index_write_headers(), timeout=5.0)
                 return resp.status_code < 300
         except Exception:
             return False
@@ -397,9 +429,7 @@ async def register_on_index_v2() -> dict:
                 "description": _agent_description,
                 "tags": [s.strip().lower() for s in _agent_focus.split(",") if s.strip()][:20],
             }
-            r = await client.post(
-                f"{index_url}/api/v1/orgs", json=body, headers={"Authorization": f"Bearer {token}"}
-            )
+            r = await client.post(f"{index_url}/api/v1/orgs", json=body, headers={"Authorization": f"Bearer {token}"})
             if r.status_code == 201:
                 registered_on_index.add(org_id)
                 _update_status(f"index:{index_url}", True, "pending_verification")
