@@ -23,6 +23,31 @@ CHANNEL_PORT = int(_os.environ.get("COMMUNITY_MEMBER_CHANNEL_PORT", "7778"))
 THINK_INTERVAL_ENV_VAR = "COMMUNITY_MEMBER_THINK_INTERVAL"
 DEFAULT_THINK_INTERVAL_SECONDS = 300
 
+# Capabilities this DEPLOYMENT cannot perform at all, comma-separated. Entries
+# are exact (``shell.exec``) or a namespace glob (``desktop.*``).
+#
+# Why a denylist exists alongside the consent gate: the gate decides whether a
+# human must approve an action. That is the right question for an action the
+# agent COULD take. It is the wrong question for one it could not: a headless
+# container has no screen and no browser, so a planner proposing
+# ``desktop.click`` is either confused or being steered, and the useful answer
+# is "this deployment cannot do that" — not a prompt somebody might approve.
+#
+# Empty by default. A desktop install legitimately uses ``desktop.*``, so the
+# denial is deployment configuration and never a guess about the host.
+DENY_CAPABILITIES_ENV_VAR = "COMMUNITY_MEMBER_DENY_CAPABILITIES"
+
+
+def denied_capabilities() -> frozenset[str]:
+    """Capability patterns this deployment refuses outright.
+
+    Read at call time, for the same reason as :func:`think_interval_seconds`:
+    one definition, honoured identically by the ``community-member`` command
+    and by the container entrypoint.
+    """
+    raw = _os.environ.get(DENY_CAPABILITIES_ENV_VAR, "")
+    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
 
 def think_interval_seconds() -> int:
     """Seconds between think cycles, from the environment.
