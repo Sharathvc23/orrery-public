@@ -383,3 +383,82 @@ def test_approve_and_deny_both_resolve_pending_view(tmp_ledger):
 
     assert any((r.get("detail") or {}).get("prompt_event_sha256") == d1.event_sha256 for r in approved)
     assert any((r.get("detail") or {}).get("prompt_event_sha256") == d2.event_sha256 for r in denied)
+
+
+# ── S11 capability denial — what this deployment cannot do at all ───────────
+#
+# The gate answers "must a human approve this?". That is the wrong question for
+# an action the agent could not perform: a headless container has no screen, so
+# `desktop.click` should be unanswerable rather than approvable. Otherwise the
+# only thing between a steered planner and a click is somebody reading a prompt
+# carefully.
+
+
+def test_a_denied_capability_is_rejected_not_prompted():
+    """Measured on the live estate: five headless Railway agents whose planner
+    is offered desktop.* and browser.* by the schema, on hosts with neither."""
+    decision = gate.evaluate(_req(capability="desktop.click"), denied=frozenset({"desktop.*"}))
+    assert decision.state == "reject"
+    assert "capability_denied" in decision.reason
+    assert "desktop.click" in decision.reason, "the refusal must name what was refused"
+
+
+def test_a_namespace_glob_denies_every_member_of_it():
+    denied = frozenset({"desktop.*"})
+    for cap in ("desktop.click", "desktop.type", "desktop.read_screen"):
+        assert gate.capability_denied(cap, denied), cap
+    # and nothing outside it
+    assert not gate.capability_denied("browser.navigate", denied)
+    assert not gate.capability_denied("desktopish.click", denied)
+
+
+def test_an_exact_entry_denies_only_that_capability():
+    denied = frozenset({"shell.exec"})
+    assert gate.capability_denied("shell.exec", denied)
+    assert not gate.capability_denied("shell.which", denied)
+
+
+def test_denial_outranks_trusted_provenance():
+    """A capability the deployment lacks cannot be reached by ANY provenance.
+
+    The strongest possible authorization — the user said so directly — still
+    cannot conjure a screen. If this ordering ever inverts, a trusted-but-wrong
+    plan reaches a prompt that somebody can approve.
+    """
+    decision = gate.evaluate(
+        _req(capability="desktop.type", provenance="trusted"),
+        denied=frozenset({"desktop.*"}),
+    )
+    assert decision.state == "reject"
+    assert "capability_denied" in decision.reason
+
+
+def test_an_empty_denylist_changes_nothing():
+    """Default for every existing install: a desktop agent legitimately uses
+    desktop.*, so the denial is deployment config and never inferred."""
+    assert gate.evaluate(_req(capability="desktop.click")).state == "prompt"
+    assert gate.evaluate(_req(capability="desktop.click"), denied=frozenset()).state == "prompt"
+
+
+def test_the_chokepoint_reads_the_denylist_so_no_call_site_can_forget(tmp_path, monkeypatch):
+    """check_and_record is the one path every proposal takes. Reading the
+    environment THERE means a new call site cannot bypass the denial by
+    forgetting to look it up — and the decision is still persisted."""
+    from community_member import DENY_CAPABILITIES_ENV_VAR
+
+    monkeypatch.setenv(DENY_CAPABILITIES_ENV_VAR, "desktop.*, shell.exec")
+    ledger.init(str(tmp_path / "consent.db"))
+
+    decision = gate.check_and_record(_req(capability="shell.exec", scope="rm"), chapter_id="local:test")
+    assert decision.state == "reject"
+    assert "capability_denied" in decision.reason
+    assert decision.event_sha256, "a refusal is still a decision and must be on the ledger"
+
+
+def test_the_reader_parses_a_comma_list_and_ignores_blanks(monkeypatch):
+    from community_member import DENY_CAPABILITIES_ENV_VAR, denied_capabilities
+
+    monkeypatch.setenv(DENY_CAPABILITIES_ENV_VAR, " desktop.* , ,shell.exec ,, ")
+    assert denied_capabilities() == frozenset({"desktop.*", "shell.exec"})
+    monkeypatch.delenv(DENY_CAPABILITIES_ENV_VAR, raising=False)
+    assert denied_capabilities() == frozenset()

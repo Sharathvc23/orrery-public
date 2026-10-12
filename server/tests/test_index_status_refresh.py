@@ -27,7 +27,12 @@ class _PutClient:
     async def __aexit__(self, *a):
         return False
 
-    async def put(self, url, json=None, timeout=None):
+    async def put(self, url, json=None, headers=None, timeout=None):
+        # headers carries the index write token when one is configured; this
+        # stub accepts it so a refresh under an authenticated index is exercised
+        # by the same tests rather than failing as a TypeError that reads like
+        # an HTTP error in _update_status.
+        self.headers = headers
         return _Resp(self._code)
 
 

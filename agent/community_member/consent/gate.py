@@ -58,6 +58,7 @@ from community_member.skill_runtime import ConsentRequired  # re-export as-is
 __all__ = [
     "ActionRequest",
     "ConsentDecision",
+    "capability_denied",
     "ConsentRequired",
     "Provenance",
     "approve",
@@ -151,17 +152,47 @@ def _validate(req: ActionRequest) -> str | None:
     return None
 
 
-def evaluate(req: ActionRequest) -> ConsentDecision:
+def capability_denied(capability: str, denied: frozenset[str]) -> bool:
+    """Whether `capability` is refused outright by this deployment.
+
+    Matches an exact capability (``shell.exec``) or a namespace glob
+    (``desktop.*`` denies ``desktop.click``, ``desktop.type``, …). Pure, so
+    `evaluate` stays pure; the environment is read by the caller.
+    """
+    if capability in denied:
+        return True
+    namespace = capability.split(".", 1)[0]
+    return f"{namespace}.*" in denied
+
+
+def evaluate(req: ActionRequest, *, denied: frozenset[str] = frozenset()) -> ConsentDecision:
     """Decide how to route `req`. Pure — no I/O, no globals.
 
     The rules implemented here encode the v2 threat model's provenance
     policy (see plans/…/yes-the-whole-point-humble-hopcroft.md §"The
     prompt-injection problem"). Downstream callers MUST persist the
     returned decision via `record_decision()` before executing.
+
+    `denied` is this deployment's capability denylist, passed in rather than
+    read, so this function keeps its no-I/O contract. `check_and_record`
+    supplies it from the environment.
     """
     err = _validate(req)
     if err is not None:
         return ConsentDecision(state="reject", reason=f"invalid_request: {err}")
+
+    # A capability this deployment does not have is not a consent question.
+    # Checked before provenance deliberately: provenance decides whether an
+    # action the agent COULD take needs a human, and there is nothing to weigh
+    # for one it could not. A headless container has no screen, so
+    # `desktop.click` must be unanswerable rather than approvable — otherwise
+    # the only thing standing between a steered planner and a click is somebody
+    # reading a prompt carefully at 3am.
+    if capability_denied(req.capability, denied):
+        return ConsentDecision(
+            state="reject",
+            reason=f"capability_denied: {req.capability} is not available on this deployment",
+        )
 
     # S3: an action whose only authorization trail is untrusted content
     # must never reach a consent prompt. This is the single most
@@ -256,14 +287,24 @@ def check_and_record(
     *,
     chapter_id: str,
     actor_agent_id: str | None = None,
+    denied: frozenset[str] | None = None,
 ) -> ConsentDecision:
     """Run the gate and persist the decision atomically.
 
     Returns the decision enriched with its event_sha256. This is what
     most callers want — the two-step split is only useful when a test
     needs to inspect the pre-persistence decision.
+
+    `denied` defaults to the deployment's configured denylist. Read HERE, the
+    single chokepoint every proposal passes through, so a new call site cannot
+    accidentally bypass the denial by forgetting to look it up; `evaluate`
+    stays pure and tests pass the set explicitly.
     """
-    decision = evaluate(req)
+    if denied is None:
+        from community_member import denied_capabilities
+
+        denied = denied_capabilities()
+    decision = evaluate(req, denied=denied)
     event_hash = record_decision(
         req,
         decision,

@@ -5,6 +5,7 @@ Validates backward compatibility with NEST and new Index registration.
 Classification: HAPPY / EDGE / FAILURE / ADVERSARIAL
 """
 
+import pathlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -512,3 +513,85 @@ async def test_registration_without_keypair_is_unattested_but_succeeds():
 
     payload = client.post.call_args[1]["json"]
     assert "attestation" not in payload
+
+
+# ── index writes carry a token when one is configured ────────────────────────
+#
+# Why these exist: the lean index authenticates writes. With no token on its own
+# side it answers 503 ("cannot authenticate writes"); with one, it answers 401
+# to a request presenting nothing. This client sent no header at all, so three
+# orgs' records sat frozen in a reachable index while /health reported http_503
+# on a loop — a state indistinguishable, from here, from the index being down.
+
+
+def _mock_client(status=201):
+    resp = MagicMock(status_code=status)
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=resp)
+    client.put = AsyncMock(return_value=resp)
+    client.delete = AsyncMock(return_value=resp)
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_index_write_carries_the_bearer_token_when_configured(monkeypatch):
+    """HAPPY: the token is presented on the write the index authenticates."""
+    monkeypatch.setenv(nanda_registry.WRITE_TOKEN_ENV, "s3cret")
+    nanda_registry._index_urls = ["https://index.nanda.org"]
+    client = _mock_client()
+
+    with patch("nanda_registry.httpx.AsyncClient", return_value=client):
+        assert await nanda_registry.register_on_index("alice", SAMPLE_FACTS) is True
+
+    assert client.post.call_args[1]["headers"] == {"Authorization": "Bearer s3cret"}
+
+
+@pytest.mark.asyncio
+async def test_no_token_sends_no_header_so_an_open_index_is_unaffected(monkeypatch):
+    """EDGE: shippable before the token is set anywhere.
+
+    An absent token must send no Authorization header at all — not an empty
+    one, which an index could read as a presented-and-wrong credential and
+    answer 401 to, turning a working open index into a broken one.
+    """
+    monkeypatch.delenv(nanda_registry.WRITE_TOKEN_ENV, raising=False)
+    nanda_registry._index_urls = ["https://index.nanda.org"]
+    client = _mock_client()
+
+    with patch("nanda_registry.httpx.AsyncClient", return_value=client):
+        assert await nanda_registry.register_on_index("alice", SAMPLE_FACTS) is True
+
+    assert client.post.call_args[1]["headers"] == {}
+
+
+@pytest.mark.asyncio
+async def test_the_refresh_and_the_withdrawal_authenticate_too(monkeypatch):
+    """FAILURE-MODE GUARD: registering is not the only write.
+
+    A heartbeat refresh (PUT) and a withdrawal (DELETE) are writes, and an
+    authenticated index refuses them exactly as it refuses a create. Fixing
+    only the create would leave a record that could be made and never updated
+    or removed.
+    """
+    monkeypatch.setenv(nanda_registry.WRITE_TOKEN_ENV, "s3cret")
+    nanda_registry._index_urls = ["https://index.nanda.org"]
+    client = _mock_client(status=200)
+
+    with patch("nanda_registry.httpx.AsyncClient", return_value=client):
+        await nanda_registry.update_index_entry("test-chapter", SAMPLE_FACTS)
+        await nanda_registry.unregister_from_index("test-chapter")
+
+    assert client.put.call_args[1]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert client.delete.call_args[1]["headers"] == {"Authorization": "Bearer s3cret"}
+
+
+def test_reads_are_never_authenticated(monkeypatch):
+    """Discovery is public. A secret on a GET widens where it can leak for
+    nothing, so the header builder is used on writes only."""
+    source = (pathlib.Path(__file__).resolve().parent.parent / "nanda_registry.py").read_text()
+    for verb in ("client.get(", "client.head("):
+        for line in source.splitlines():
+            if verb in line:
+                assert "_index_write_headers" not in line, f"a read presents the write token: {line.strip()}"

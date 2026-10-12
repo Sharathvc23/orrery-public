@@ -25,8 +25,28 @@ EXPOSE 7100
 HEALTHCHECK --interval=15s --timeout=5s --retries=20 \
   CMD curl -fsS "http://localhost:${PORT:-7100}/health" || exit 1
 
+# Non-root: the index process runs as uid 10001.
+#
+# /app is image content, so owning it at build time is correct and final.
+#
+# /data IS NOT. At build time it is an empty directory in the image; at runtime
+# the platform mounts a volume over it carrying the ownership of whatever wrote
+# it — root — so uid 10001 could not write and sqlite failed every write with
+# "attempt to write a readonly database" while reads kept answering. A
+# build-time chown cannot fix a runtime mount; the adoption has to happen after
+# the mount and before privileges drop, which is what the entrypoint does.
+#
+# There is no USER instruction, for the same reason Dockerfile.agent has none:
+# dropping here would leave the entrypoint unable to adopt the volume. It starts
+# as root, adopts the directory holding INDEX_DB_PATH, and execs the index as
+# orrery via setpriv, so no privileged process survives it.
 RUN groupadd --gid 10001 orrery \
-  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin orrery
-USER orrery
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin orrery \
+  && mkdir -p /data /home/orrery \
+  && chown -R orrery:orrery /app /home/orrery
 
+COPY infra/index-entrypoint.sh /usr/local/bin/index-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/index-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/index-entrypoint.sh"]
 CMD ["python", "main.py"]

@@ -132,6 +132,11 @@ ERROR_CALLER_REQUIRED = -32004
 #: apart without parsing prose.
 ERROR_NOT_TASK_CREATOR = -32005
 
+#: Too much work, too fast, from one caller. Server-error range like its
+#: siblings, so a peer that does not know this code still reads it as "the
+#: server refused", not as the work itself having failed.
+ERROR_RATE_LIMITED = -32006
+
 # Type alias for the tool dispatcher injected from agent.py
 ToolDispatcher = Callable[[str, dict[str, Any]], Awaitable[str]]
 
