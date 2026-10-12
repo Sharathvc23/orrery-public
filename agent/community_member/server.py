@@ -1224,10 +1224,10 @@ def create_app(config: Config, agent=None) -> FastAPI:
         """Google A2A JSON-RPC 2.0 endpoint. Handles tasks/send, tasks/get,
         tasks/cancel synchronously; tasks/sendSubscribe and tasks/resubscribe
         stream via SSE. The method field in the envelope decides which."""
-        from fastapi.responses import StreamingResponse
+        from fastapi.responses import JSONResponse, StreamingResponse
 
-        from . import a2a_auth
-        from .a2a_rpc import ERROR_PARSE, STREAMING_METHODS, rpc_error
+        from . import a2a_auth, inbound_rate
+        from .a2a_rpc import ERROR_PARSE, ERROR_RATE_LIMITED, STREAMING_METHODS, rpc_error
 
         # ⚠️ THE RAW BYTES, NOT A RE-SERIALISED DICT. The signature is over the
         # body exactly as sent; ``json.dumps`` of the parsed object produces
@@ -1245,6 +1245,46 @@ def create_app(config: Config, agent=None) -> FastAPI:
         caller = a2a_auth.verify_caller(dict(request.headers), raw.decode("utf-8", "replace"))
 
         method = body.get("method") if isinstance(body, dict) else None
+
+        # HOW MUCH WORK ONE CALLER MAY CREATE, PER WINDOW.
+        #
+        # `a2a_auth` stops at attribution — it proves possession of a key and
+        # says outright that it "is not an allowlist". Anyone can mint a
+        # keypair, so a listed agent holding a provider key can be driven by a
+        # stranger, one signed send at a time, without limit. This bounds the
+        # rate; it is not an allowlist either, because deciding WHICH peers may
+        # call is the operator's policy call and an open network is partly the
+        # point.
+        #
+        # Scoped to work-creating methods on the same axis `a2a_auth` uses:
+        # reads cost no provider credit and throttling them would break the
+        # polling flow the open-read decision exists to serve.
+        if a2a_auth.requires_caller(method):
+            bucket = inbound_rate.caller_bucket(
+                # did_key is the caller's proven identity; agent_id is
+                # self-asserted alongside it and must not key a bucket, or a
+                # caller could claim somebody else's and spend their quota.
+                getattr(caller, "did_key", "") or None,
+                request.client.host if request.client else None,
+            )
+            allowed, _remaining, retry_after = inbound_rate.check(bucket)
+            if not allowed:
+                max_requests, window = inbound_rate.limits()
+                # HTTP 429 *and* a JSON-RPC error: a rate limit is a transport
+                # fact an ordinary HTTP client already knows how to back off
+                # from, and the JSON-RPC envelope is what an A2A peer parses.
+                # Serving only one of the two leaves one of those two callers
+                # unable to tell this from a failure of the work itself.
+                return JSONResponse(
+                    status_code=429,
+                    headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
+                    content=rpc_error(
+                        body.get("id") if isinstance(body, dict) else None,
+                        ERROR_RATE_LIMITED,
+                        f"rate limit: {max_requests} {method} per {window:g}s per caller; retry in {retry_after:.0f}s",
+                    ),
+                )
+
         if method in STREAMING_METHODS:
             return StreamingResponse(
                 _rpc_handler.stream(body, caller=caller),

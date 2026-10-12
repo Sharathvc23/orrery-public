@@ -42,8 +42,13 @@ behaviour depends on this. No call site changes behaviour by importing it.
 
 from __future__ import annotations
 
+import json as _json
 import os
+import threading as _threading
 from dataclasses import dataclass, field
+from datetime import UTC as _UTC
+from datetime import datetime as _datetime
+from pathlib import Path as _Path
 from typing import Any
 
 __all__ = [
@@ -553,6 +558,173 @@ class CallBudget:
         self.used += 1
 
 
+#: How many calls this process may make in a UTC day. Finite by default and
+#: generously so: the autonomous loop alone makes about 288 calls a day at the
+#: 300s default interval, so this is roughly seven times a normal day's work. An
+#: agent doing its job never reaches it; a runaway — a loop, a hostile caller, a
+#: misconfigured peer — stops here instead of at the credit limit on the card. A
+#: cap a working agent trips is a cap somebody switches off.
+#:
+#: 0 disables it, which must be a deliberate act recorded in the environment
+#: rather than something that happens because a variable is unset.
+CALLS_PER_DAY_ENV = "LLM_CALLS_PER_DAY"
+DEFAULT_CALLS_PER_DAY = 2000
+
+#: Where the day's count lives. Explicit override first, then whichever home the
+#: tree that vendored this module uses — this file is shared verbatim between the
+#: agent and the org, so it may not import either one's config.
+DAILY_BUDGET_PATH_ENV = "LLM_DAILY_BUDGET_PATH"
+_HOME_ENV_VARS = ("COMMUNITY_MEMBER_HOME", "ORG_HOME")
+
+
+class DailyBudgetExceeded(LLMCallBudgetExceeded):
+    """The day's LLM calls are spent.
+
+    A subclass of the per-cycle error so every caller that already handles a
+    budget refusal handles this one too. A new exception type would have been
+    caught by nothing and surfaced as an unhandled crash in a think loop that
+    already knows how to report "budget" and carry on.
+    """
+
+
+def calls_per_day() -> int:
+    """The daily cap, read at call time. 0 means disabled.
+
+    A value that is not an integer falls back to the default rather than
+    disabling the cap: a typo must not silently remove a cost control. Zero is
+    honoured because it is unambiguous — somebody typed it.
+    """
+    raw = os.environ.get(CALLS_PER_DAY_ENV, "").strip()
+    if not raw:
+        return DEFAULT_CALLS_PER_DAY
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_CALLS_PER_DAY
+    return value if value >= 0 else DEFAULT_CALLS_PER_DAY
+
+
+class DailyCallBudget:
+    """Calls per UTC day, counted on disk so a restart does not forgive them.
+
+    WHY A SECOND BUDGET. ``CYCLE_BUDGET`` bounds one think cycle, which is the
+    right bound for a runaway inside a cycle and no bound at all on the day: it
+    resets at the top of every cycle, so N cycles cost N times the cap, and a
+    restart resets it too. Nothing bounded the total.
+
+    That mattered less while these processes talked only to each other. It
+    matters once they are listed in a public index with provider keys
+    configured, because the A2A caller gate proves possession of a key and
+    nothing more — it is explicitly not an allowlist, so anyone can mint a
+    keypair and send work.
+
+    DURABLE, BECAUSE A RESTART MUST NOT FORGIVE. A crash-loop would otherwise
+    reset the day's spend on every boot, removing the cap at exactly the moment
+    something is going wrong. An unwritable home degrades to per-process
+    counting rather than taking the process off the air, and ``state()`` reports
+    that so the weakening is visible rather than assumed.
+
+    CALLS, NOT TOKENS OR MONEY. A call count is the only quantity knowable
+    BEFORE a request. Tokens are known afterwards and money needs a price table
+    this tree deliberately does not carry, so a coarse bound that is always
+    enforceable beats a precise one that can only be applied too late.
+    """
+
+    def __init__(self) -> None:
+        self._lock = _threading.Lock()
+        self._memory: tuple[str, int] = ("", 0)
+
+    def path(self) -> _Path:
+        override = os.environ.get(DAILY_BUDGET_PATH_ENV, "").strip()
+        if override:
+            return _Path(override)
+        for var in _HOME_ENV_VARS:
+            home = os.environ.get(var, "").strip()
+            if home:
+                return _Path(home) / "llm_daily_budget.json"
+        return _Path.home() / ".community-member" / "llm_daily_budget.json"
+
+    @staticmethod
+    def today() -> str:
+        return _datetime.now(_UTC).strftime("%Y-%m-%d")
+
+    def _read(self) -> tuple[str, int]:
+        try:
+            data = _json.loads(self.path().read_text())
+            if isinstance(data, dict):
+                return str(data.get("day", "")), int(data.get("used", 0))
+        except (OSError, ValueError, TypeError):
+            pass
+        return self._memory
+
+    def _write(self, day: str, used: int) -> None:
+        self._memory = (day, used)
+        path = self.path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_json.dumps({"day": day, "used": used}) + "\n")
+        except OSError:
+            # Weaker bound, still a bound. Reported via state().
+            pass
+
+    def used_today(self) -> int:
+        day, used = self._read()
+        return used if day == self.today() else 0
+
+    def state(self) -> dict:
+        """``{day, used, limit, remaining, enforced, durable}`` for /health."""
+        limit = calls_per_day()
+        used = self.used_today()
+        path = self.path()
+        try:
+            durable = path.exists() or os.access(path.parent, os.W_OK)
+        except OSError:
+            durable = False
+        return {
+            "day": self.today(),
+            "used": used,
+            "limit": limit,
+            "remaining": max(0, limit - used) if limit else None,
+            "enforced": bool(limit),
+            "durable": bool(durable),
+        }
+
+    def spend(self) -> None:
+        """Count one call, or refuse.
+
+        The day rolls over by comparing the stored date, not by a timer: a
+        process up for three days must not still be spending Monday's budget.
+        """
+        limit = calls_per_day()
+        if not limit:
+            return
+        today = self.today()
+        with self._lock:
+            day, used = self._read()
+            used = used if day == today else 0
+            if used >= limit:
+                raise DailyBudgetExceeded(
+                    f"this process has made {used} LLM calls today, its limit "
+                    f"({CALLS_PER_DAY_ENV}={limit}). No further calls will be made until the "
+                    f"UTC day rolls over. Raise the limit deliberately if this is real work."
+                )
+            self._write(today, used + 1)
+
+    def reset(self) -> None:
+        """Forget today's count. For tests and for an operator clearing a mistake."""
+        with self._lock:
+            self._memory = ("", 0)
+            try:
+                self.path().unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+#: One per process, like CYCLE_BUDGET and for the same reason: the factory hands
+#: out many clients and the bound is on the process, not on any one of them.
+DAILY_BUDGET = DailyCallBudget()
+
+
 def calls_per_cycle() -> int:
     raw = os.environ.get(CALLS_PER_CYCLE_ENV, "").strip()
     if not raw:
@@ -578,6 +750,13 @@ class _BudgetedCompletions:
         self._budget = budget
 
     def create(self, *args: Any, **kwargs: Any) -> Any:
+        # THE DAY FIRST, THEN THE CYCLE. The cycle budget resets at the top of
+        # every cycle and on every restart, so it bounds a runaway loop and
+        # bounds the day not at all: N cycles cost N times the cap. The daily
+        # cap is the more absolute statement, so it answers first — and it is
+        # durable, because a crash-loop must not forgive the day's spend at
+        # exactly the moment something is going wrong.
+        DAILY_BUDGET.spend()
         self._budget.spend()
         return self._inner.create(*args, **kwargs)
 

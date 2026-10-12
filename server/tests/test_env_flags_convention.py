@@ -190,6 +190,18 @@ NOT_SECURITY_RELEVANT: dict[str, str] = {
     "INDEX_ACCOUNT_EMAIL": "Account identifier for registration; the password is the credential.",
     "ORG_CONTACT_EMAIL": "Contact address published in registry metadata.",
     "INDEX_ORG_ID": "Identifier of this org's own registry record; names a record, grants nothing.",
+    "LLM_CALLS_PER_DAY": (
+        "Calls per UTC day this process may make, enforced durably in llm_runtime's "
+        "client factory. Finite by default (2000, ~7x a normal autonomous day), so an "
+        "unset variable still enforces; 0 disables it deliberately. Not a security gate "
+        "— it is a COST bound, and the thing it bounds is a stranger driving a publicly "
+        "listed agent that holds a provider key."
+    ),
+    "LLM_DAILY_BUDGET_PATH": (
+        "Where the day's call count is persisted. Defaults to the tree's own home "
+        "(COMMUNITY_MEMBER_HOME or ORG_HOME). An unwritable path weakens the cap to "
+        "per-process counting rather than removing it, and the state is reported."
+    ),
     "LLM_ELIDE_ENABLED": (
         "Skips an LLM call whose prompt inputs are unchanged. Gates only the two "
         "narrative types (insight, introduction_propose) — never approvals_sweep, "
