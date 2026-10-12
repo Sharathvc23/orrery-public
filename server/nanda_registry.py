@@ -74,6 +74,10 @@ def configured_registries() -> list[str]:
     return urls
 
 
+#: Env var holding the bearer token an index requires on writes.
+WRITE_TOKEN_ENV = "NANDA_INDEX_WRITE_TOKEN"
+
+
 def get_registry_status() -> dict:
     """Return the most recent per-registry status for /health exposure."""
     return {
@@ -87,15 +91,19 @@ def get_registry_status() -> dict:
             {
                 "url": url,
                 "configured": True,
+                # Whether a write token is held — NOT the token. An index that
+                # authenticates writes answers 401 to a request presenting
+                # nothing, which from outside is indistinguishable from
+                # presenting the wrong one; and `http_401` alone cannot tell an
+                # operator which of the two they are looking at. Chasing that
+                # distinction by inference cost an hour: the only honest answer
+                # is to say whether this process holds a token at all.
+                "write_token": bool(os.environ.get(WRITE_TOKEN_ENV, "").strip()),
                 **_last_status.get(f"index:{url}", {}),
             }
             for url in _index_urls
         ],
     }
-
-
-#: Env var holding the bearer token an index requires on writes.
-WRITE_TOKEN_ENV = "NANDA_INDEX_WRITE_TOKEN"
 
 
 def _index_write_headers() -> dict[str, str]:
