@@ -142,6 +142,67 @@ class Discovery:
         return attestation_copy.rendering_for(self.owner_attestation)
 
 
+#: The NANDA extension namespace operational fields are nested under on an
+#: IndexEntry.
+_NANDA_EXT = "org.projectnanda"
+
+
+def normalise_entry(record: dict[str, Any]) -> dict[str, Any]:
+    """One record shape for the rest of this module, from either wire shape.
+
+    ⚠️ THE INDEX HAS CHANGED THIS TWICE IN ONE DAY. It served an IndexRecord
+    (snake_case, ``media_type``/``registry_url``, ``status`` at the top level)
+    under ``index_record``; it now serves an AI Catalog IndexEntry (camelCase,
+    ``type``/``url``, operational fields nested under
+    ``extensions["org.projectnanda"]``) under ``entry``. Measured live, hours
+    apart, on the same endpoint.
+
+    BOTH ARE ACCEPTED, and that is not fence-sitting. This client talks to more
+    than one index — the public one, a second index the venue checks, a lean
+    corroboration registry — and they do not migrate together. A resolver that
+    understood only the newest shape would break against every peer that had
+    not caught up yet, which is exactly the failure this function exists to
+    stop happening a third time.
+
+    Returns the snake_case spelling the rest of the module already reads, so a
+    wire change lands here and nowhere else.
+    """
+    extensions = record.get("extensions")
+    nanda = extensions.get(_NANDA_EXT) if isinstance(extensions, dict) else None
+    nanda = nanda if isinstance(nanda, dict) else {}
+
+    def first(*candidates: Any) -> Any:
+        for value in candidates:
+            if value not in (None, ""):
+                return value
+        return None
+
+    merged = dict(record)
+    merged["media_type"] = first(record.get("media_type"), record.get("type"))
+    merged["registry_url"] = first(record.get("registry_url"), record.get("url"))
+    # An IndexEntry carries status under the extension; an IndexRecord at the
+    # top. Absent in both is NOT "active": the caller refuses what it cannot
+    # confirm, so the empty string flows through to the not_active refusal.
+    merged["status"] = first(record.get("status"), nanda.get("status"))
+    merged["trust_manifest"] = first(record.get("trust_manifest"), record.get("trustManifest"))
+    merged["org_id"] = first(record.get("org_id"), nanda.get("orgId"))
+    return merged
+
+
+def entry_of(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The record out of a resolve envelope, under either key.
+
+    ``index_record`` was the key; ``entry`` is the key now. Reading only the
+    old one turned a working four-hop into ``no_index_record`` with nothing
+    wrong on either side.
+    """
+    for key in ("entry", "index_record"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+    return None
+
+
 def _refuse(reason: str, detail: str, **kept: Any) -> Discovery:
     return Discovery(ok=False, reason=reason, detail=detail, **kept)
 
@@ -206,9 +267,14 @@ def resolve(
     if not isinstance(payload, dict):
         return _refuse("index_not_json", "resolve did not return an object", locator=locator)
 
-    record = payload.get("index_record")
-    if not isinstance(record, dict):
-        return _refuse("no_index_record", "resolve returned no index_record", locator=locator)
+    raw_record = entry_of(payload)
+    if raw_record is None:
+        return _refuse(
+            "no_index_record",
+            "resolve returned neither an 'entry' nor an 'index_record'",
+            locator=locator,
+        )
+    record = normalise_entry(raw_record)
 
     status = str(record.get("status") or "")
     if status != "active":
