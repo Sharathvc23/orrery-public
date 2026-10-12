@@ -320,17 +320,20 @@ def test_the_key_read_is_the_key_the_record_writes():
         domain="example.com",
         contact_email="nanda-smb@example.com",
     )
-    assert attestation_copy.ATTESTATION_KEY in record["catalog_metadata"]
+    assert attestation_copy.ATTESTATION_KEY in record["extensions"][attestation_copy.EXTENSION_NAMESPACE]
     assert attestation_copy.attestation_of(record) == owner.OWNER_OPERATOR_VOUCHED
     assert attestation_copy.rendering_for(attestation_copy.attestation_of(record)).value == owner.OWNER_OPERATOR_VOUCHED
 
 
-def test_the_read_side_key_name_is_honoured_too():
-    """``catalog_metadata`` on write, ``metadata`` on read — the mapping is an
-    inference, so both names are read. A reader that knew only the write name
-    would call every LIVE record absent."""
-    read_shape = {"metadata": {attestation_copy.ATTESTATION_KEY: owner.OWNER_DOMAIN_VERIFIED}}
+def test_one_name_on_both_sides_and_the_flat_form_is_not_it():
+    """``extensions["org.projectnanda"]`` is written and read under one name, so
+    the two-name lookup this reader used to need is gone. The retired flat form
+    is asserted NOT to be honoured: reading it would resurrect the ambiguity the
+    namespace exists to remove, and no live record carries it."""
+    read_shape = {"extensions": {"org.projectnanda": {attestation_copy.ATTESTATION_KEY: owner.OWNER_DOMAIN_VERIFIED}}}
     assert attestation_copy.attestation_of(read_shape) == owner.OWNER_DOMAIN_VERIFIED
+    flat = {"metadata": {"org.projectnanda.ownerAttestation": owner.OWNER_DOMAIN_VERIFIED}}
+    assert attestation_copy.attestation_of(flat) is None
 
 
 def test_a_non_string_value_is_not_passed_off_as_one():
@@ -338,7 +341,7 @@ def test_a_non_string_value_is_not_passed_off_as_one():
     belongs is an unusable value, and it reads as ABSENT rather than as
     ``str(...)`` of whatever arrived."""
     for junk in (7, {"a": 1}, ["domain_verified"], True, None):
-        record = {"metadata": {attestation_copy.ATTESTATION_KEY: junk}}
+        record = {"extensions": {"org.projectnanda": {attestation_copy.ATTESTATION_KEY: junk}}}
         assert attestation_copy.attestation_of(record) is None, junk
 
 
@@ -353,7 +356,7 @@ def test_discovery_carries_the_attestation_of_the_record_it_resolved():
     found = nanda_index.Discovery(
         ok=True,
         reason="ok",
-        record={"metadata": {attestation_copy.ATTESTATION_KEY: owner.OWNER_INDIVIDUAL_OIDC}},
+        record={"extensions": {"org.projectnanda": {attestation_copy.ATTESTATION_KEY: owner.OWNER_INDIVIDUAL_OIDC}}},
     )
     assert found.owner_attestation == owner.OWNER_INDIVIDUAL_OIDC
     assert found.attestation.value == owner.OWNER_INDIVIDUAL_OIDC

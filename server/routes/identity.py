@@ -247,16 +247,39 @@ def _member_catalog_entry(member_id: str, member: dict) -> dict | None:
     }
 
 
+#: The short-name the Index hands this registry hop for an org-level resolve.
+#:
+#: The Index keys every entry on an ARD identifier,
+#: ``urn:air:<publisher-FQDN>:<namespace...>:<short-name>``, and ``/resolve``
+#: passes the hop the SHORT-NAME alone — "the key to look up inside a catalog".
+#: Orrery registers with ``hosting_path=registry`` and sends no identifier, so
+#: the Index derives ``urn:air:<ORG_DOMAIN>:catalog:root`` and every org-level
+#: resolve therefore arrives here as ``root``. Measured on the live index
+#: 2026-10-11: ``urn:air:regentix.ai:catalog:root`` → ``identifier='root'``,
+#: which this registry answered with a 404 until it was added below.
+AIR_CATALOG_SHORT_NAME = "root"
+
+
 def _registry_aliases() -> set[str]:
     """All identifiers (lowercased) that resolve to this org's PRIMARY agent.
 
-    A NANDA resolver hands hop-2 whatever the Index passed through as the
+    A NANDA resolver hands this hop whatever the Index passed through as the
     identifier, which may be:
-      * the agent_id (``urn:ai:domain:<DOM>:agent:<slug>`` → slug), or
-      * the org DOMAIN (an org-level ``urn:ai:domain:<DOM>`` with no ``:agent:``
-        slug → the Index hands the DOMAIN as the identifier), or
-      * the org_id registered at the Index.
-    All three must resolve to the same primary-agent CatalogEntry, or the live
+      * ``root`` — the short-name of the org's own ``urn:air:<DOM>:catalog:root``
+        entry, which is what the Index v2 ``/resolve`` contract now returns for
+        an org-level locator (see :data:`AIR_CATALOG_SHORT_NAME`), or
+      * the short-name of an agent-level ``urn:air:<DOM>:agent:<slug>`` entry
+        (→ ``slug``), or
+      * the agent_id / org_id as registered, for the NEST path, which passes the
+        id it was given rather than an ARD short-name.
+
+    The org DOMAIN is no longer among them: an ARD identifier has no bare-domain
+    form — the minimum is ``<publisher-FQDN>:<namespace>:<short-name>`` — so the
+    Index cannot hand one. The domain candidates are kept anyway, because NEST
+    and local dev do address this hop by host, and an alias that nothing sends
+    costs a set membership test.
+
+    All of them must resolve to the same primary-agent CatalogEntry, or the live
     NANDA UI 404s the listing.
     """
     from urllib.parse import urlparse
@@ -264,8 +287,9 @@ def _registry_aliases() -> set[str]:
     parsed = urlparse(ca.PUBLIC_URL)
     org_id_raw = os.environ.get("INDEX_ORG_ID", "").strip() or ca.AGENT_ID
     candidates = {
+        AIR_CATALOG_SHORT_NAME,  # urn:air:<DOM>:catalog:root — what the Index sends
         ca.AGENT_ID,  # agent-level (exact match preserved)
-        parsed.hostname or "",  # org DOMAIN (host, no port)
+        parsed.hostname or "",  # org DOMAIN (host, no port) — NEST / local dev
         parsed.netloc or "",  # host:port form (local/dev)
         os.environ.get("ORG_DOMAIN", "").strip(),  # explicit registered domain
         org_id_raw,  # org_id as configured
@@ -281,9 +305,10 @@ async def registry_agent_record(identifier: str) -> JSONResponse:
     Orrery is its own registry (``hosting_path=registry``). A NANDA resolver
     that found ``registry_url=ca.PUBLIC_URL`` in the Index fetches THIS, then
     follows ``CatalogEntry.url`` to the standard A2A card. Public/OPEN — the
-    registry hop is unauthenticated. The org's PRIMARY agent answers to its
-    agent_id, its org_id, AND its domain (see _registry_aliases). An org MEMBER
- resolves to its host39 card. Anything else 404s.
+    registry hop is unauthenticated. The org's PRIMARY agent answers to ``root``
+    — the short-name the Index passes for an org-level locator — and to its
+    agent_id, org_id and domain (see _registry_aliases). An org MEMBER resolves
+    to its host39 card. Anything else 404s.
     """
     if identifier.lower() in _registry_aliases():
         return JSONResponse(content=_org_catalog_entry())

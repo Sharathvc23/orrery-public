@@ -1,10 +1,14 @@
 # Handshake spec: SMB → NANDA
 ### Orrery (agent runtime) · host39 (card host + registrar) · api.nandaindex.org (the one index)
 
-Engineering-ready. Grounded in **current code**, traced 2026-07-25:
+Engineering-ready. Grounded in **current code**, traced 2026-07-25; index contract
+re-traced against the live service 2026-10-11 (the identifier scheme changed — see below).
 - **Orrery `smb_host`** — `Sharathvc23/orrery-public` `main` (current). `/provision` returns `{tenant_id, endpoint, did, recovery_phrase}`; serves the card at `/t/<tenant>/.well-known/agent.json` and booking at `/t/<tenant>/book`. **Makes no index calls** (by design — one index, not ours).
-- **host39** — `projnanda/host39` `origin/main` `3522ed3`. Account `POST /auth/register` (JWT); card `POST /cards` (JWT, `runtime_url` **optional/nullable**); serves `/:domain/:slug.json` + `/personal/:handle/:slug.json` as `application/a2a-agent-card+json`; URN `urn:ai:{domain|email}:…:agent:<slug>`. **No index client, no did:key/signing, JWT-only (no machine auth), domain ownership unverified.**
-- **api.nandaindex.org** — `nanda-index-v2` `origin/main` `5b8b0d8`, live v2.0.0. `POST /api/v1/orgs` (JWT) inserts `status=pending`. **Activation: DNS-TXT for domain orgs (admin); email-link for PERSONAL (no-domain) orgs → `active`.** No host-vouched activation, no machine/API-key, no bulk. Resolve: `GET /api/v1/resolve?locator=<urn>` → `{index_record.registry_url}` → caller fetches the card.
+- **host39** — `projnanda/host39` `origin/main` `3522ed3`. Account `POST /auth/register` (JWT); card `POST /cards` (JWT, `runtime_url` **optional/nullable**); serves `/:domain/:slug.json` + `/personal/:handle/:slug.json` as `application/a2a-agent-card+json`; URN `urn:ai:{domain|email}:…:agent:<slug>` **as of that commit — the index no longer accepts that form** (see the index bullet). **No index client, no did:key/signing, JWT-only (no machine auth), domain ownership unverified.**
+- **api.nandaindex.org** — `nanda-index-v2` `origin/main` `19ee5af`, live. `POST /api/v1/orgs` (JWT) inserts `status=pending`. **Activation: DNS-TXT for domain orgs (admin); email-link for PERSONAL (no-domain) orgs → `active`.** No host-vouched activation, no machine/API-key, no bulk. Resolve: `GET /api/v1/resolve?locator=<urn>` → `{match, identifier, index_record}` → caller fetches `index_record.registry_url`.
+  - **Identifiers are ARD `urn:air:` URNs**, anchored to the publisher FQDN: `urn:air:<domain>:agent:<slug>` for a domain org, `urn:air:host39.org:personal:<email>` for a no-domain one (the email verbatim, percent-encoded only where a URN segment cannot hold it). The index **derives** it from the domain it verified — a client-sent identifier anchored anywhere else is refused — so `POST /api/v1/orgs` no longer carries one.
+  - `resolve` returns the **short-name**, not the URN, plus `match: exact | publisher`. A `publisher` match means no entry holds the locator and the publisher's catalog entry came back instead.
+  - Catalog extension fields are nested: `extensions: {"org.projectnanda": {…}}`, not flat `org.projectnanda.*` keys under `catalog_metadata`.
 
 ---
 
@@ -40,11 +44,11 @@ host39 ──2. POST {orrery-smb-host}/provision {business_name}──► Orrery
    │     https://agentcards.host39.org/personal/<handle>/<slug>.json
    │  4. POST api.nandaindex.org/api/v1/orgs
    │       {hosting_path:"personal", contact_email:<SMB email>,
-   │        registry_url:<host39 card URL>, identifier:urn:ai:email:<email>:agent:<slug>}
+   │        registry_url:<host39 card URL>}        # no identifier — the index derives it
    ▼
 api.nandaindex.org ──5. emails verify link to <SMB email>──► SMB clicks → status=active
    ▼
-resolvable: GET /api/v1/resolve?locator=urn:ai:email:<email>:agent:<slug>
+resolvable: GET /api/v1/resolve?locator=urn:air:host39.org:personal:<email>
    → registry_url (host39 card) → runtime_url (Orrery endpoint) → book → VERIFIABLE receipt
 ```
 
@@ -113,7 +117,7 @@ has not blessed; it needs host39 confirmation, or a first-class extension field.
 
 **Leg C — host39 → index register** *(host39: BUILD — no client today)*
 `POST https://api.nandaindex.org/api/v1/orgs` with a JWT, body:
-`{org_id, display_name, contact_email:<SMB email>, hosting_path:"personal", registry_url:<host39 card URL>, identifier:"urn:ai:email:<email>:agent:<slug>"}` → `201`, `status:pending`, verify-email sent.
+`{org_id, display_name, contact_email:<SMB email>, hosting_path:"personal", registry_url:<host39 card URL>}` → `201`, `status:pending`, verify-email sent. **No `identifier`** — for `hosting_path:"personal"` the index mints `urn:air:host39.org:personal:<contact_email>` and refuses one that disagrees.
 
 **Leg D — activation** *(SMB: one email click; today's live behavior)*
 Index emails `<SMB email>` a link `…/api/v1/verify-email?token=…`. SMB clicks → `markEmailVerifiedByToken` flips `status→active` for the no-domain org. Now resolvable.
@@ -142,7 +146,7 @@ Index emails `<SMB email>` a link `…/api/v1/verify-email?token=…`. SMB click
 | | Personal / email (recommended) | Domain |
 |---|---|---|
 | Who | no-infra SMB (just an email) | SMB that owns a domain |
-| URN | `urn:ai:email:<email>:agent:<slug>` | `urn:ai:domain:<domain>:agent:<slug>` |
+| URN (minted by the index) | `urn:air:host39.org:personal:<email>` | `urn:air:<domain>:agent:<slug>` |
 | Activation **today** | **email link → active (no DNS, no vouching)** | DNS-TXT `_nanda-challenge.<domain>` (admin) |
 | Blocks a no-domain barber? | **No** | Yes (needs a domain + DNS) |
 | For true 3-click (no email click) | needs index **host-vouched activation** | needs index host-vouched activation |

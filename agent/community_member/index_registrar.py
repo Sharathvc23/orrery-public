@@ -34,10 +34,14 @@ that builds a tenant's record, next to ``host39.py``, which is the same kind of
 thing (an upstream publishing client with credentials).
 
 ⚠️ THE RECORD SAYS TWO DIFFERENT THINGS, AND THEY MUST NOT BE CONFLATED.
-``identifier: urn:ai:domain:<our-domain>:agent:<slug>`` says WHO VOUCHED for the
+The identifier ``urn:air:<our-domain>:agent:<slug>`` says WHO VOUCHED for the
 listing — us, the host operator, because it is our domain that is verified.
 ``trust_manifest.identity: did:key:…`` says WHO SIGNS THE RECEIPTS — the tenant.
 The barber does not own our domain and nothing here may imply they do.
+
+The Index derives that identifier itself from the registering domain, so this
+module no longer sends one: the anchor is the domain whose ownership was proven,
+and an identifier anchored anywhere else is refused outright.
 
 ⚠️ NO PRECEDENT FOR THE did:key. Across all 251 live records the string
 ``did:key`` appears zero times: ``identityType: "did"`` is common but every
@@ -69,22 +73,30 @@ CONTACT_ENV = "ORG_CONTACT_EMAIL"
 
 MEDIA_A2A_CARD = "application/a2a-agent-card+json"
 
-#: ``hosting_path`` is OMITTED by default, and that is a decision rather than an
-#: oversight. The live enum is ``registry | dns-aid | smb | personal``; the field
-#: is optional; and it is WRITE-ONLY — absent from every read schema and from all
-#: 251 live records — so no amount of reading reveals what a value does.
+#: ``hosting_path`` is now SENT, and ``smb`` is the value. It was omitted while
+#: the field was write-only and its effect unobservable; the Index has since
+#: published what each path does, so the honest default changed with the
+#: evidence.
 #:
-#: What is documented: ``GET /api/v1/verify-email`` "activates personal orgs;
-#: others still need domain verification". We WANT domain verification, because
-#: it is verified once per domain instead of once per business. So sending
-#: ``personal`` would actively request the activation we do not want, and ``smb``
-#: — which looks apt by name — has unknown activation behaviour. Omitting sends
-#: no claim at all, which is the only honest option for a field whose effect we
-#: cannot observe. Override deliberately via ``hosting_path=`` if a write ever
-#: settles it.
-HOSTING_PATH: str | None = None
+#: The enum is ``registry | dns-svcb | smb | personal`` (``dns-aid`` retired in
+#: favour of DNS service discovery). The path picks the identifier namespace, the
+#: default media type, and the server-owned routing keys. For ``smb`` those keys
+#: are ``resolutionRole: smb-agent-card`` and ``preferredDiscovery: nandaindex``
+#: — exactly the two values this module used to write by hand into the extension
+#: bag, which the Index now refuses from a client and derives itself. So sending
+#: ``smb`` is not a new claim: it is the same claim, made in the field that
+#: carries it.
+#:
+#: ``personal`` remains the one we must not send: it anchors the identifier to
+#: the card host instead of our domain, and asks for email activation in place
+#: of the domain verification we want (verified once per domain, not once per
+#: business).
+HOSTING_PATH: str | None = "smb"
 
 _ORG_ID = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+#: Mirrors the index's own FQDN check on the publisher anchor, so a domain it
+#: would refuse is caught here instead of as a 400 on a live third party.
+_FQDN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 _TIMEOUT = 20.0
 
 
@@ -210,12 +222,13 @@ def build_org_record(
     what is sent. A dry run that rendered an approximation would be worse than
     no dry run.
 
-    ⚠️ ``catalog_metadata`` CARRIES THE ``org.projectnanda.*`` CONVENTION, AND
-    THAT MAPPING IS AN INFERENCE. Reads expose ``metadata`` and ``data``; writes
-    accept ``catalog_metadata`` and ``entry_data``. Neither write name appears on
-    read and neither read name appears on write, so the pairing is near-certain —
-    but it is unconfirmed until a real registration is read back. The post-write
-    check reports whether the convention keys survived rather than assuming they did.
+    ``extensions`` carries the ``org.projectnanda`` convention, and the write and
+    read names are now THE SAME NAME. The old asymmetry — ``catalog_metadata``
+    on write, ``metadata`` on read — is gone, along with the inference it forced:
+    both halves are ``extensions``, a reverse-DNS namespace mapping to that
+    namespace's fields. The post-write check still reports whether the convention
+    keys survived, because a key the server drops is the failure that matters and
+    it is now cheap to see.
 
     ``grant_verdict`` is the ``owner.GrantVerdict`` from the listing gate, when
     the caller has consulted it. It carries evidence, not a conclusion: the
@@ -238,41 +251,57 @@ def build_org_record(
         # exactly why smb_host (which serves no registry surfaces) can be the target.
         "registry_url": card_url,
         "media_type": MEDIA_A2A_CARD,
-        "identifier": f"urn:ai:domain:{domain}:agent:{slug}",
+        # NO ``identifier``. The Index derives it from the domain whose ownership
+        # it verified — for hosting_path=smb that is urn:air:<domain>:agent:<org_id>,
+        # and org_id IS this slug, so the derived value is the one this module
+        # used to send. Sending our own is strictly worse: an identifier anchored
+        # to anything but the registering domain is refused, and one anchored to
+        # it is the string the server would have built anyway.
         "description": description or tenant_description(business_name),
         "tags": sorted(set(tags))[:20],
         # WHO VOUCHED. The publisher is the host operator, identified by the
         # domain that is actually verified. Saying the business is the publisher
-        # would assert a domain claim it cannot back.
+        # would assert a domain claim it cannot back. Only the display name is
+        # ours to send — the Index sets ``identifier`` to the bare verified
+        # domain and ``identityType`` to ``dns`` itself, which is what this
+        # block asserted by hand when a client could still say it.
         "publisher": {
-            "identifier": f"urn:ai:domain:{domain}",
             "displayName": domain,
-            "identityType": "dns",
         },
         # WHO SIGNS. The tenant's own key, independent of the vouching above.
         "trust_manifest": {
             "identity": did,
             "identityType": "did",
         },
-        "catalog_metadata": {
-            "org.projectnanda.agentCardHost": _host_of(card_url),
-            "org.projectnanda.resolutionRole": "smb-agent-card",
-            "org.projectnanda.preferredDiscovery": "nandaindex",
-            "org.projectnanda.nandaIndexRole": "optional-fallback-entry",
-            "org.projectnanda.auth.metadata": "public",
-            "org.projectnanda.auth.execution": "booking_session_required",
-            "org.projectnanda.runtime.provider": domain,
-            # What was checked about the owner of this business, derived from the
-            # evidence the listing gate accepted. Always present: absent-and-valid
-            # is not a state this field has, and a reader who does not find it
-            # cannot tell "nobody checked" from "the writer forgot".
-            #
-            # The business's own domain and principal are deliberately not passed.
-            # `domain` here is the operator's verified domain — it is what the
-            # publisher block and the identifier are built from — so handing it to
-            # the derivation as the business's domain would manufacture exactly
-            # the domain_verified claim that nothing checked.
-            "org.projectnanda.ownerAttestation": _owner_attestation(grant_verdict),
+        # The AI Catalog extension bag: a reverse-DNS namespace mapping to its
+        # own fields, not flat dotted keys at the top level.
+        #
+        # ``resolutionRole`` and ``preferredDiscovery`` are NOT here. They are
+        # server-owned: the Index derives them from ``hosting_path=smb`` as
+        # ``smb-agent-card`` / ``nandaindex`` — the exact values this bag used to
+        # carry — and strips them from client input. Sending them would be a
+        # no-op that read as a claim.
+        "extensions": {
+            "org.projectnanda": {
+                "agentCardHost": _host_of(card_url),
+                "nandaIndexRole": "optional-fallback-entry",
+                "auth.metadata": "public",
+                "auth.execution": "booking_session_required",
+                "runtime.provider": domain,
+                # What was checked about the owner of this business, derived from
+                # the evidence the listing gate accepted. Always present:
+                # absent-and-valid is not a state this field has, and a reader
+                # who does not find it cannot tell "nobody checked" from "the
+                # writer forgot".
+                #
+                # The business's own domain and principal are deliberately not
+                # passed. `domain` here is the operator's verified domain — it is
+                # what the publisher block and the identifier are built from — so
+                # handing it to the derivation as the business's domain would
+                # manufacture exactly the domain_verified claim that nothing
+                # checked.
+                "ownerAttestation": _owner_attestation(grant_verdict),
+            },
         },
     }
     if version:
@@ -317,6 +346,20 @@ def record_problems(record: dict[str, Any]) -> list[str]:
     did = str((record.get("trust_manifest") or {}).get("identity") or "")
     if not did.startswith("did:key:"):
         problems.append(f"trust_manifest.identity {did!r} is not a did:key")
+    # The domain is the OWNERSHIP ANCHOR the index derives the identifier from,
+    # so it has to be a real FQDN. A blank one is refused outright (it would
+    # anchor the identifier nowhere), and so is anything the index's own FQDN
+    # check rejects — which is where a hostname with a port, a scheme, or a
+    # trailing dot ends up.
+    domain = str(record.get("domain") or "").strip()
+    if not domain:
+        problems.append(
+            "domain is empty — it is the anchor the identifier is derived from, "
+            "and an entry with no domain is anchored to the card host instead "
+            "(hosting_path=personal), which is not what this registrar registers"
+        )
+    elif not _FQDN.match(domain.lower()):
+        problems.append(f"domain {domain!r} is not a bare FQDN (no scheme, port or trailing dot)")
     return problems
 
 
@@ -445,26 +488,52 @@ def _json_or_text(response: httpx.Response) -> Any:
 # ── the success condition ────────────────────────────────────────────────────
 
 
-def confirm_by_resolve(record: dict[str, Any], *, index: str | None = None) -> Any:
+def derived_identifier(record: dict[str, Any]) -> str:
+    """The identifier the index will mint for this record, built the same way.
+
+    ``hosting_path=smb`` anchors the entry to the registering domain and names
+    it after the org_id: ``urn:air:<domain>:agent:<org_id>``. Recomputed here
+    only as a FALLBACK for confirming a record whose POST response we no longer
+    hold — the authoritative value is the ``identifier`` the index returns on
+    the 201, and :func:`confirm_by_resolve` prefers it.
+    """
+    domain = str(record.get("domain") or "").strip().lower()
+    org_id = str(record.get("org_id") or "").strip()
+    if not (domain and org_id):
+        return ""
+    return f"urn:air:{domain}:agent:{org_id}"
+
+
+def confirm_by_resolve(
+    record: dict[str, Any],
+    *,
+    identifier: str | None = None,
+    index: str | None = None,
+) -> Any:
     """THE success condition: does the index resolve our URN to our card?
 
     Not the 201, and not presence in the bulk listing — a live record is
     ``active`` in the listing and unresolvable at ``resolve`` today. This calls
     the same discovery path an outside caller would use, so a pass means an
     outside caller can do it too.
+
+    ``identifier`` is the one the index assigned, from the create response. The
+    record itself no longer carries one (the index derives it), so pass it
+    through; absent it, :func:`derived_identifier` recomputes the same string.
     """
     from . import nanda_index
 
-    return nanda_index.discover(str(record.get("identifier") or ""), index=index or _env(BASE_URL_ENV) or None)
+    locator = (identifier or "").strip() or str(record.get("identifier") or "") or derived_identifier(record)
+    return nanda_index.discover(locator, index=index or _env(BASE_URL_ENV) or None)
 
 
 def confirmation_problems(record: dict[str, Any], found: Any) -> list[str]:
     """What is still wrong AFTER a resolve that returned our record.
 
     Resolving is necessary and not sufficient: the record can resolve while
-    carrying the wrong card, losing the ``org.projectnanda.*`` convention (the
-    ``catalog_metadata`` -> ``metadata`` mapping is inferred, not confirmed), or
-    dropping the ``did:key`` nobody has published before.
+    carrying the wrong card, landing on the PUBLISHER's entry instead of ours,
+    losing the ``org.projectnanda`` convention keys, or dropping the ``did:key``
+    nobody has published before.
     """
     problems: list[str] = []
     if not found.ok:
@@ -486,17 +555,25 @@ def confirmation_problems(record: dict[str, Any], found: Any) -> list[str]:
     if found.did and expected_did and found.did != expected_did:
         problems.append(f"the card's did ({found.did}) is not the did the index record vouches for ({expected_did})")
 
-    sent_meta = record.get("catalog_metadata") or {}
-    got_meta = found.record.get("metadata")
-    if sent_meta and not isinstance(got_meta, dict):
+    # A PUBLISHER match is not our record. When no entry holds the exact
+    # identifier, the index answers an org-level locator with the publisher's own
+    # catalog entry instead — a 200 describing a DIFFERENT agent. For an
+    # a2a-agent-card record that is a wrong answer dressed as a right one, so it
+    # is named here rather than left to the did comparison to catch by accident.
+    if str(found.record.get("org_id") or "") != str(record.get("org_id") or ""):
         problems.append(
-            "catalog_metadata did not come back as metadata — the inferred "
-            "catalog_metadata -> metadata mapping is wrong"
+            f"resolve returned org_id {found.record.get('org_id')!r}, not {record.get('org_id')!r} — "
+            "the index matched the PUBLISHER's entry, which means no entry holds our identifier"
         )
-    elif sent_meta and isinstance(got_meta, dict):
-        lost = sorted(set(sent_meta) - set(got_meta))
+
+    sent_ext = (record.get("extensions") or {}).get("org.projectnanda") or {}
+    got_ext = (found.record.get("extensions") or {}).get("org.projectnanda")
+    if sent_ext and not isinstance(got_ext, dict):
+        problems.append("extensions['org.projectnanda'] did not come back as an object")
+    elif sent_ext and isinstance(got_ext, dict):
+        lost = sorted(set(sent_ext) - set(got_ext))
         if lost:
-            problems.append(f"the org.projectnanda.* convention keys did not survive: {lost}")
+            problems.append(f"the org.projectnanda convention keys did not survive: {lost}")
     return problems
 
 

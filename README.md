@@ -291,8 +291,8 @@ is no per-member opt-out of that today — the join response says so.
 
 ```
   4-hop resolution (how anyone reaches one of your agents, when you publish):
-    Index.resolve(urn:ai:domain:DOMAIN:agent:ID)
-      → org   GET /agents/ID               (the registry hop → a CatalogEntry)
+    Index.resolve(urn:air:DOMAIN:catalog:root)
+      → org   GET /agents/root             (the registry hop → a CatalogEntry)
       → host39 GET /DOMAIN/slug.json        (the agent's A2A card)
       → agent GET /.well-known/agent.json  →  invoke
 ```

@@ -38,7 +38,7 @@ USAGE::
 
     from community_member import nanda_index
 
-    found = nanda_index.discover("urn:ai:domain:example.com:agent:booking")
+    found = nanda_index.discover("urn:air:example.com:agent:booking")
     if not found:
         print(f"cannot reach it: {found.reason} — {found.detail}")
     else:
@@ -98,6 +98,11 @@ class Discovery:
     detail: str = ""
     locator: str = ""
     identifier: str = ""
+    #: How the index matched the locator: ``exact`` (an entry is registered under
+    #: exactly this identifier) or ``publisher`` (none is, so the publisher's own
+    #: catalog entry came back instead, for the caller to look the short-name up
+    #: inside). Empty when the index did not say.
+    match: str = ""
     record: dict[str, Any] = field(default_factory=dict)
     card: dict[str, Any] = field(default_factory=dict)
     endpoint: str = ""
@@ -149,8 +154,18 @@ def resolve(
 ) -> Discovery:
     """``GET /api/v1/resolve?locator=…`` — the index record, or a named refusal.
 
-    Returns a Discovery carrying only ``record``/``identifier``; it makes no
-    second hop. ``discover`` is the whole chain.
+    Returns a Discovery carrying only ``record``/``identifier``/``match``; it
+    makes no second hop. ``discover`` is the whole chain.
+
+    ⚠️ ``identifier`` IS THE SHORT-NAME, NOT THE URN. The index keys entries on
+    ``urn:air:<publisher-FQDN>:<namespace...>:<short-name>`` and passes back the
+    short-name alone — the key to look up inside a catalog on the next hop. The
+    full URN is in ``record['identifier']``.
+
+    ⚠️ A 200 IS NOT ALWAYS OUR RECORD. ``match: "publisher"`` means no entry
+    holds the locator and the publisher's own catalog entry came back instead.
+    That is the right answer for a catalog walk and a WRONG one for a record
+    whose url is already a card; :func:`fetch_card` is where that is refused.
     """
     if not locator.strip():
         return _refuse("no_locator", "a locator is required")
@@ -169,6 +184,10 @@ def resolve(
         # The index answers 404 both for "no such record" and for a record that
         # exists but is not active. It does not distinguish them and neither do
         # we — claiming to know which would be inventing information.
+        #
+        # Narrower than it was: an unknown short-name under a publisher that
+        # fronts a catalog now comes back 200 with ``match: "publisher"``
+        # instead, so a 404 no longer covers that case.
         return _refuse(
             "not_resolvable",
             f"the index does not resolve {locator!r} (no such record, or it is not active)",
@@ -201,6 +220,7 @@ def resolve(
             f"the record resolves but its status is {status!r}, not 'active'",
             locator=locator,
             identifier=str(payload.get("identifier") or ""),
+            match=str(payload.get("match") or ""),
             record=record,
         )
 
@@ -209,6 +229,7 @@ def resolve(
         reason="ok",
         locator=locator,
         identifier=str(payload.get("identifier") or record.get("identifier") or ""),
+        match=str(payload.get("match") or ""),
         record=record,
     )
 
@@ -226,6 +247,16 @@ def fetch_card(
     means it is a registry to walk (four hops). Any other declared type is
     REFUSED by name — a resolver that fell back to "try it as a card" would
     return a wrong answer for an MCP server card or a skill zip.
+
+    ⚠️ A PUBLISHER MATCH ON A CARD RECORD IS REFUSED. ``match: "publisher"``
+    means the index found no entry for the locator and answered with the
+    publisher's entry instead. Walking a catalog with the short-name is then
+    exactly right — the entry fronts many agents and the walk fails honestly if
+    ours is not among them. Fetching a CARD is not: ``registry_url`` is one
+    specific agent's card, so a publisher match would return somebody else's
+    agent for the one that was asked for, and the only thing standing between
+    that and a caller is the did comparison, which is a separate check a caller
+    may not make.
     """
     if not resolved.ok:
         return resolved
@@ -237,10 +268,22 @@ def fetch_card(
             "the record carries no registry_url, so it names nothing to fetch",
             locator=resolved.locator,
             identifier=resolved.identifier,
+            match=resolved.match,
             record=record,
         )
 
     media_type = str(record.get("media_type") or "").strip()
+    if resolved.match == "publisher" and media_type == MEDIA_A2A_CARD:
+        return _refuse(
+            "publisher_match_not_the_agent",
+            f"the index matched {resolved.locator!r} to the PUBLISHER's entry, not an entry of "
+            f"its own, and that entry's url is one specific agent's card — fetching it would "
+            f"return a different agent than the one asked for",
+            locator=resolved.locator,
+            identifier=resolved.identifier,
+            match=resolved.match,
+            record=record,
+        )
     owned = client is None
     http = client or httpx.Client(timeout=_RESOLVE_TIMEOUT, follow_redirects=True)
     try:
@@ -255,6 +298,7 @@ def fetch_card(
                 f"(known: {MEDIA_A2A_CARD}, {MEDIA_AI_CATALOG})",
                 locator=resolved.locator,
                 identifier=resolved.identifier,
+                match=resolved.match,
                 record=record,
             )
     except _HopError as exc:
@@ -263,6 +307,7 @@ def fetch_card(
             exc.detail,
             locator=resolved.locator,
             identifier=resolved.identifier,
+            match=resolved.match,
             record=record,
         )
     finally:
@@ -280,6 +325,7 @@ def fetch_card(
             "the card resolved but its 'url' is empty — there is no endpoint to call",
             locator=resolved.locator,
             identifier=resolved.identifier,
+            match=resolved.match,
             record=record,
             card=card,
         )
@@ -289,6 +335,7 @@ def fetch_card(
         reason="ok",
         locator=resolved.locator,
         identifier=resolved.identifier,
+        match=resolved.match,
         record=record,
         card=card,
         endpoint=endpoint.rstrip("/"),
