@@ -67,6 +67,22 @@ def floor_verdict(doc: dict[str, Any], org_identifier: str) -> tuple[str, str]:
     decision cannot be read as an unpublished card, and this function must not
     re-merge what that route took care to split.
     """
+    if not org_identifier:
+        # Checked FIRST, and fail-closed. Without the org's own identifier its
+        # entry cannot be told apart from a member's, so no count below means
+        # anything. `GET /agents/root` is served by the same route module as the
+        # catalog itself, so a readable catalog with an unreadable root entry is
+        # its own finding and not a reason to go quiet — the floor refuses rather
+        # than reporting on a population it cannot delimit.
+        return (
+            FLOOR_FAILED,
+            "FLOOR UNEVALUATED — this org's own identifier could not be read from "
+            "GET /agents/root, so its entry cannot be told apart from a member's "
+            "and the member count means nothing. That surface is served beside the "
+            "catalog, so a readable catalog with an unreadable root entry is itself "
+            "the finding. Refusing to report green for a floor that was not checked.",
+        )
+
     withheld = doc.get("withheldMembers")
     if withheld is None:
         # An older deployment that does not emit the count. The canary cannot

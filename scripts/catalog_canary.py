@@ -113,19 +113,11 @@ def check_org(client: httpx.Client, base: str) -> tuple[int, int, list[str], str
     # The floor, reported on EVERY run including when it holds or cannot be
     # evaluated. A verdict that is only printed when it fails is a verdict
     # nobody can tell apart from one that was never reached.
-    org_id = _org_identifier(client, base)
-    if not org_id:
-        breach = (
-            "GET /agents/root did not return this org's identifier, so its own entry "
-            "cannot be told apart from a member's and the floor was NOT evaluated. "
-            "That surface is served beside the catalog itself, so a readable catalog "
-            "with an unreadable root entry is its own finding."
-        )
-        print(f"  floor: UNEVALUATED — {breach}")
-        return resolved, len(entries), failures, f"{base}: {breach}"
-
-    verdict, message = floor_verdict(doc, org_id)
-    label = {FLOOR_OK: "ok", FLOOR_FAILED: "BREACHED"}.get(verdict, "UNOBSERVABLE")
+    # An unreadable identifier is passed through as "" rather than branched on
+    # here: the floor owns that decision (and fails closed on it) so a test can
+    # drive it without httpx, which the doc-guards job does not install.
+    verdict, message = floor_verdict(doc, _org_identifier(client, base))
+    label = {FLOOR_OK: "ok", FLOOR_FAILED: "FAILED"}.get(verdict, "UNOBSERVABLE")
     print(f"  floor: {label} — {message}")
     return resolved, len(entries), failures, f"{base}: {message}" if verdict == FLOOR_FAILED else ""
 

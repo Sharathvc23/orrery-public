@@ -160,3 +160,33 @@ def test_the_success_line_claims_both_halves():
     assert ok_lines, "the success line is gone — did it move? this guard needs updating"
     for line in ok_lines:
         assert "members to verify" in line, f"unqualified success claim: {line.strip()}"
+
+
+def test_an_unreadable_org_identifier_fails_closed():
+    """Without the org's identifier, no member count below means anything.
+
+    ``GET /agents/root`` is served by the same route module as the catalog, so a
+    readable catalog with an unreadable root entry is its own finding. The floor
+    therefore REFUSES rather than going quiet — and this decision lives in the
+    floor module, not in the canary, precisely so it can be driven here: the
+    canary imports ``httpx`` and ``doc-guards`` installs only pytest.
+    """
+    floor = _floor()
+    doc = _catalog([{"identifier": "whoever"}, {"identifier": "whoever-ceo"}], omitted=0, withheld=0)
+    verdict, message = floor.floor_verdict(doc, "")
+    assert verdict == floor.FLOOR_FAILED
+    assert "/agents/root" in message, "the message must name the surface that failed"
+    assert "not checked" in message
+
+
+def test_an_unreadable_identifier_outranks_a_withholding_org():
+    """Checked FIRST: withholding cannot downgrade it to unobservable.
+
+    Otherwise an org that both withholds and loses /agents/root would report
+    UNOBSERVABLE, and the unreadable root entry — the harder finding — would be
+    the one that went unsaid.
+    """
+    floor = _floor()
+    doc = _catalog([{"identifier": "whoever"}], omitted=0, withheld=12)
+    verdict, _ = floor.floor_verdict(doc, "")
+    assert verdict == floor.FLOOR_FAILED
