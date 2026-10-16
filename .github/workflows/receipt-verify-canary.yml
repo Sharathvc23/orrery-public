@@ -38,4 +38,11 @@ jobs:
       - name: Verify each org's published bundle
         env:
           ORGS: ${{ github.event.inputs.orgs || vars.CANARY_ORGS }}
+          # TRUE only in the repository that operates these deployments, so a
+          # fork keeps the clean skip while an unconfigured target here is a
+          # failure. This is the half that was missing: CANARY_ORGS was never
+          # recreated when the tree was snapshotted into the public repo, and
+          # both canaries skipped green every six hours from 2026-09-19 to
+          # 2026-10-15 without anyone noticing.
+          CANARY_REQUIRE_TARGETS: ${{ github.repository == 'Sharathvc23/orrery-public' }}
         run: python scripts/receipt_verify_canary.py
