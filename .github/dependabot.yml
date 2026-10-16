@@ -30,8 +30,31 @@ updates:
   # The digest-pinned base images. A digest never moves, which is the point and
   # also the problem: it keeps serving the image it named, security fixes and
   # all, until someone repins it.
+  #
+  # TWO entries, and both are required, because `docker` reads Dockerfiles and
+  # Kubernetes manifests ONLY — it does not read Compose files. With just the
+  # first entry the very first bumps arrived HALF APPLIED: one moved
+  # python:3.12-slim to 3.14-slim in three Dockerfiles while docker-compose.yml
+  # kept the 3.12 digest for its renderer service, and another repinned
+  # pgvector/pgvector:pg15 in Dockerfile.db while docker-compose.yml kept the old
+  # digest in three places — so `e2e` booted the image the change had not
+  # touched and reported green on a pin it never exercised.
   - package-ecosystem: docker
     directory: "/infra"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+
+  # ⚠️ The same image pinned in docker-compose.yml. An image bump therefore
+  # arrives as TWO pull requests, one per ecosystem, and they MUST LAND
+  # TOGETHER: merging one alone leaves the same image pinned two ways, which is
+  # the drift the digest pinning exists to prevent. Groups cannot span
+  # ecosystems, so this cannot be collapsed into one PR — check for the sibling
+  # before merging either.
+  - package-ecosystem: docker-compose
+    directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
