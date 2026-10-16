@@ -561,7 +561,7 @@ Compose `.env`.
 | `REGISTRY_ATTESTATION_TTL_S` | `86400` (24h) | Validity window for a registry attestation. |
 | `RAILWAY_PUBLIC_DOMAIN` | — (platform-set) | Platform-injected public domain; when set, `resolve_public_url()` returns `https://<domain>`. Falls back to `PUBLIC_URL`. |
 | `MAX_MEMBERS` | `40` | Cap on the number of agents that can join the org. |
-| `ORG_HOST39_CARD_BASE` | — (empty) | Base URL of externally (host39-)hosted member A2A cards. **Unset = self-serve member cards:** a member that sent its public URL on join resolves to `{endpoint}/.well-known/agent.json` — its own served card; pure self-hosters need no host39 dependency. Set = the host39 card path, unchanged. |
+| `ORG_HOST39_CARD_BASE` | — (empty) | Base URL of externally (host39-)hosted member A2A cards. **Unset = self-serve member cards:** a member that sent its public URL on join resolves to `{endpoint}/.well-known/agent.json` — its own served card; pure self-hosters need no host39 dependency. **Set is necessary but NOT sufficient:** the catalog advertises a member's host39 card only once that member carries a publication record — see *The card base alone does not publish* below. |
 | `METRICS_BEARER_TOKEN` | — (empty) | Bearer token that gates `/metrics`. |
 | `MEMBER_PERSIST_OUTBOX_PATH` | `member_persist_outbox.jsonl` | Durable outbox for member rows whose Postgres write failed after retries — replayed at boot so a member is never silently lost. Point it at a path on a **durable volume** in production (a fresh container filesystem is ephemeral). Watch `nanda_chapter_db_failures_total` + `nanda_chapter_member_persist_failures_total` for non-zero. |
 | `FEDERATION_AUTODISCOVER` | `false` | Enable cross-org peer discovery + sync. Opt-in. |
@@ -571,6 +571,65 @@ Compose `.env`.
 | `THINK_CYCLE_INTERVAL` | `120` | Seconds between org think-loop cycles. |
 | `SSE_POLL_INTERVAL_S` | `2.0` | Seconds between server-sent-event poll ticks. |
 | `CHAPTER_SLUG`, `CHAPTER_DISPLAY_NAME` | derived from `ORG_ID` / `ORG_NAME` | Internal slug / display-name overrides; `chapter` is an internal-only term — prefer `ORG_ID` / `ORG_NAME`. |
+
+### The card base alone does not publish
+
+Setting `ORG_HOST39_CARD_BASE` tells the org **where** member cards live. It does not
+assert that any particular card **exists**. Those are two different facts, and the AI
+Catalog needs the second one.
+
+So a member is advertised with a host39 card URL only once that member carries a
+publication record — written by `POST /admin/api/host39/record-publication/{agent_id}`,
+and never inferred. Registration deliberately does not fire it, because publishing a card
+is an explicit operator trigger.
+
+**Why it works this way.** The catalog used to emit a host39 URL for *every* member
+whenever the base was set, so it advertised cards for members who had never had one
+created. Measured live on 2026-08-02: 24 entries, 6 resolved, **18 returned 404**. A
+registry that advertises URLs nothing backs is worse to a crawler than one that lists
+less.
+
+**What this costs you, and it is the part that gets skipped.** On the deploy that first
+enforces the rule, *nothing* carries a record — including the members whose cards were
+published by hand and resolve perfectly well. The catalog correctly stops advertising the
+dead entries and also stops advertising the live ones. Two ways to put the live ones back:
+
+```bash
+# Per member, at publish time — records on the org right after a successful POST /cards.
+export ORG_ADMIN_TOKEN=...
+scripts/publish_host39_card.py --record-on-org https://org.example.org     --record-agent-id <agent_id>
+
+# Or once, for members whose cards ALREADY resolve. Dry run by default; writes
+# nothing without --apply. Probes each would-be card URL and records only the 200s,
+# so it never invents a record for a card that does not exist.
+scripts/backfill_host39_publications.py --org https://org.example.org
+scripts/backfill_host39_publications.py --org https://org.example.org --apply
+```
+
+**⚠️ The ordering is not symmetric, and getting it wrong is unrecoverable from any public
+surface.** The backfill discovers members by reading the org's own catalog. Before the
+rule is enforced the recording endpoint does not exist, so a run then does nothing; after
+it is enforced the catalog has *already* omitted the members the backfill would have
+found. The first-time backfill therefore needs a member list captured **before** the
+deploy:
+
+```bash
+# BEFORE deploying
+curl -s https://org.example.org/.well-known/ai-catalog.json > snap.json
+# AFTER deploying
+scripts/backfill_host39_publications.py --org https://org.example.org     --from-snapshot snap.json --apply
+```
+
+`GET /api/members` is auth-gated by design, so there is no open surface to rebuild that
+list from afterwards. Capture the snapshot in the same step that does the deploy. Once
+it is done the live catalog is authoritative again and `--from-snapshot` is unnecessary.
+
+**How to tell this bit you.** The org logs
+`[catalog] N member(s) omitted from /.well-known/ai-catalog.json — no published host39
+card and no http(s) endpoint`, and the catalog itself reports the count as
+`omittedMembers`. That count is **not** a consent signal: members withheld from an
+unauthenticated caller are counted separately as `withheldMembers`. A catalog that
+advertises nothing but the org's own root card fails `scripts/catalog_canary.py`.
 
 ## Production profile
 
