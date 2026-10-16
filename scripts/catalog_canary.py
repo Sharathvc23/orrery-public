@@ -35,6 +35,8 @@ import sys
 
 import httpx
 
+from _canary_targets import refusal, targets_are_required
+
 TIMEOUT = 20.0
 
 
@@ -81,6 +83,10 @@ def check_org(client: httpx.Client, base: str) -> tuple[int, int, list[str]]:
 def main() -> int:
     orgs = _orgs()
     if not orgs:
+        # Required HERE, a clean skip in a fork — see _canary_targets.
+        if targets_are_required():
+            print(refusal("read or resolved"))
+            return 1
         # Skip, not fail, and never silently: a public fork must run green
         # without pointing at anyone's infrastructure. Worded so it cannot be
         # mistaken for a successful check — this run verified nothing.

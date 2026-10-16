@@ -28,6 +28,8 @@ import sys
 import httpx
 import sm_arp
 
+from _canary_targets import refusal, targets_are_required
+
 SAMPLE = os.environ.get("SAMPLE_ID", "sample")
 
 
@@ -95,6 +97,10 @@ def check(client: httpx.Client, base: str) -> tuple[str, list[str]]:
 def main() -> int:
     orgs = os.environ.get("ORGS", "").split()
     if not orgs:
+        # Required HERE, a clean skip in a fork — see _canary_targets.
+        if targets_are_required():
+            print(refusal("fetched or verified"))
+            return 1
         # Skip, not fail, and never silently. Stated bluntly because this file
         # argues at length that a canary green with nothing to check is a false
         # green: an unset target is exactly that shape, so the message has to
