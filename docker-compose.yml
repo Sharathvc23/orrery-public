@@ -18,7 +18,7 @@
 
 services:
   db:
-    image: pgvector/pgvector:pg15@sha256:a20a57d7aa5217a6af0a391ccf69f4a8512406d6c14be08132f801468cc3cc62
+    image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orrery}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -54,7 +54,7 @@ services:
   # with its error kept, so the log names what was wrong instead of only that
   # something was.
   db-ready:
-    image: pgvector/pgvector:pg15@sha256:a20a57d7aa5217a6af0a391ccf69f4a8512406d6c14be08132f801468cc3cc62
+    image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
     depends_on:
       - db
     environment:
@@ -308,7 +308,7 @@ services:
   # dump cannot be restored to a working identity. See docs/BACKUP_RESTORE.md.
   db-backup:
     profiles: ["backup"]
-    image: pgvector/pgvector:pg15@sha256:a20a57d7aa5217a6af0a391ccf69f4a8512406d6c14be08132f801468cc3cc62
+    image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
     depends_on:
       db:
         condition: service_healthy
