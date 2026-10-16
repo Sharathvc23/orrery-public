@@ -1,0 +1,8 @@
+# Review routing. Branch protection does not REQUIRE a review on this
+# repository — it requires the `ci gate` check — so this file requests one
+# rather than enforcing it. It matters as soon as a second person has push
+# access: without it an outside contribution can sit with nobody named on it.
+#
+# GitHub never requests review from the author of a pull request, so a
+# single-maintainer repository sees no self-requests from this.
+* @Sharathvc23
