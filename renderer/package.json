@@ -10,6 +10,6 @@
     "test:e2e": "node --test tests/e2e/*.e2e.mjs"
   },
   "devDependencies": {
-    "playwright": "1.61.1"
+    "playwright": "1.64.0"
   }
 }
