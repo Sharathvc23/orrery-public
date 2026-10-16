@@ -1,0 +1,50 @@
+# Dependency updates, scoped to the ecosystems where this repository actually
+# pins something Dependabot can move.
+#
+# WHY pip IS ABSENT, so nobody adds a broken entry later: every Python
+# dependency here is pinned in a `requirements.lock`, and Dependabot's pip
+# ecosystem does not recognise that filename — a `pip` entry pointed at one
+# resolves no dependency files and fails silently. The locks are not unwatched.
+# `dependency CVE scan` in ci.yml runs `pip-audit` over EVERY pin file, with the
+# file set derived by regex rather than listed (the job once named three by hand
+# and missed the rest — see tests/test_cve_scan_covers_every_lock.py), and the
+# ignore file is empty. That gate reports a vulnerable pin; a human moves it and
+# re-locks, which is the discipline this repository already holds.
+version: 2
+updates:
+  # The SHA-pinned Actions. These are the pins that go stale invisibly: a tag
+  # moves under you or the runtime is deprecated, and nothing in the repository
+  # can see it, because supply-chain-pins only checks that a pin IS a SHA, never
+  # that the SHA is current. Grouped so five bumps arrive as one review.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+
+  # The digest-pinned base images. A digest never moves, which is the point and
+  # also the problem: it keeps serving the image it named, security fixes and
+  # all, until someone repins it.
+  - package-ecosystem: docker
+    directory: "/infra"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+
+  # renderer/ carries one devDependency (playwright) and no runtime ones.
+  # Monthly: a browser-automation pin that drifts a few weeks is not a risk to
+  # anything this repository serves.
+  - package-ecosystem: npm
+    directory: "/renderer"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
