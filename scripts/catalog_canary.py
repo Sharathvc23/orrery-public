@@ -55,7 +55,7 @@ import httpx
 
 from _canary_targets import refusal, targets_are_required
 from _catalog_floor import FLOOR_FAILED, FLOOR_OK, floor_verdict
-from _probe_status import NOT_READY, OK, OTHER, probe, remediation_for
+from _probe_status import NOT_READY, OK, OTHER, ProbeResult, probe, remediation_for
 
 TIMEOUT = 20.0
 
@@ -96,7 +96,7 @@ def _orgs() -> list[str]:
     return [u.rstrip("/") for u in raw.split()]
 
 
-def _org_identifier(client: httpx.Client, base: str) -> tuple[str, int, str]:
+def _org_identifier(client: httpx.Client, base: str) -> tuple[str, ProbeResult, str]:
     """This org's OWN catalog entry identifier, asked of the org itself.
 
     ``GET /agents/root`` serves exactly the entry the catalog puts first
@@ -110,17 +110,18 @@ def _org_identifier(client: httpx.Client, base: str) -> tuple[str, int, str]:
     a perfectly healthy org. The fix is to retry before reaching the fail-closed
     path — not to soften where that path leads.
 
-    Also returns the attempt count and, when the read failed, a description of
+    Also returns the probe itself and, when the read failed, a description of
     what was observed, so a run can tell a 404 on the root surface apart from a
     gateway that never woke.
     """
     result = probe(client.get, f"{base}/agents/root")
     if result.verdict != OK:
-        return "", result.attempts, result.describe()
+        return "", result, result.describe()
     try:
-        return str((result.response.json() or {}).get("identifier") or "").strip(), result.attempts, ""
+        identifier = str((result.response.json() or {}).get("identifier") or "").strip()
     except Exception as exc:  # noqa: BLE001 — a root entry that is not JSON IS the finding
-        return "", result.attempts, f"unreadable body ({type(exc).__name__}: {exc})"
+        return "", result, f"unreadable body ({type(exc).__name__}: {exc})"
+    return identifier, result, ""
 
 
 def check_org(client: httpx.Client, base: str) -> OrgReport:
@@ -137,9 +138,12 @@ def check_org(client: httpx.Client, base: str) -> OrgReport:
     try:
         doc = catalog.response.json()
     except Exception as exc:  # noqa: BLE001 — a catalog that is not JSON IS the failure
+        # No woke count on this path: the probe did answer, but a catalog that
+        # cold-starts and then serves unparseable JSON has a shape bug, and
+        # "1 probe needed a retry" printed beside it reads as an explanation.
         message = f"{base}: catalog unreadable ({type(exc).__name__}: {exc})"
-        return OrgReport(0, 0, [Trouble(OTHER, message)], "", catalog.attempts - 1)
-    woke += catalog.attempts - 1
+        return OrgReport(0, 0, [Trouble(OTHER, message)], "", 0)
+    woke += 1 if catalog.woke else 0
 
     entries = doc.get("entries") or []
     omitted = doc.get("omittedMembers")
@@ -155,7 +159,7 @@ def check_org(client: httpx.Client, base: str) -> OrgReport:
         if result.verdict == OK:
             resolved += 1
             if result.woke:
-                woke += result.attempts - 1
+                woke += 1
                 cold.append(f"{ident} answered 200 on attempt {result.attempts}")
             continue
         troubles.append(Trouble(result.verdict, f"{base}: {ident} -> {url} {result.describe()}"))
@@ -171,14 +175,14 @@ def check_org(client: httpx.Client, base: str) -> OrgReport:
     # An unreadable identifier is passed through as "" rather than branched on
     # here: the floor owns that decision (and fails closed on it) so a test can
     # drive it without httpx, which the doc-guards job does not install.
-    identifier, root_attempts, root_trouble = _org_identifier(client, base)
-    woke += root_attempts - 1 if identifier else 0
+    identifier, root, root_trouble = _org_identifier(client, base)
+    woke += 1 if root.woke else 0
     if root_trouble:
         # Named separately from the floor's own message so a reader can tell a
         # root surface that 404s from one that never woke.
         print(f"  root: /agents/root {root_trouble} — the floor cannot be evaluated")
-    elif root_attempts > 1:
-        print(f"  woke: /agents/root answered 200 on attempt {root_attempts} — a cold start")
+    elif root.woke:
+        print(f"  woke: /agents/root answered 200 on attempt {root.attempts} — a cold start")
     verdict, message = floor_verdict(doc, identifier)
     label = {FLOOR_OK: "ok", FLOOR_FAILED: "FAILED"}.get(verdict, "UNOBSERVABLE")
     print(f"  floor: {label} — {message}")
