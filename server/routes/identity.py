@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -298,6 +299,181 @@ def _registry_aliases() -> set[str]:
     return {c.lower() for c in candidates if c}
 
 
+def _gated_catalog_entries(caller: str, *, surface: str) -> tuple[list[dict], int, int]:
+    """Every CatalogEntry `caller` may see, plus the two counts, kept apart.
+
+    ONE implementation behind BOTH unauthenticated hops into this population —
+    ``/.well-known/ai-catalog.json`` and ``/agents/search``. A second copy of
+    this loop would be a second place for the member gate to be wrong, and only
+    one of the two would be the one anybody tested. The audit that closed the
+    member list found an email address and a phone number in a member's
+    free-text description, reachable by an unauthenticated GET; a search route
+    that did its own gating would be exactly where that reopens.
+
+    ``omittedMembers`` and ``withheldMembers`` are returned SEPARATELY and must
+    stay that way. Omitted = no resolvable card URL (the resolvable-card rule — advertising a URL
+    nothing backs is what the live catalog did for 18 of 24 entries). Withheld =
+    the caller is not entitled to see it. Folding them together makes a privacy
+    decision indistinguishable from an unpublished card, and
+    ``member_listing.consenting_entries`` says why a count must not be read as a
+    consent signal either: these are neither.
+    """
+    public_members = publishes_members_publicly()
+    entries = [_org_catalog_entry()]
+    omitted = 0
+    withheld = 0
+    for member_id, member in ca.members.items():
+        if not caller and not public_members:
+            withheld += 1
+            continue
+        entry = _member_catalog_entry(member_id, member)
+        if entry is not None:
+            entries.append(entry)
+        else:
+            omitted += 1
+    if omitted:
+        print(
+            f"[catalog] {omitted} member(s) omitted from {surface} — "
+            f"no published host39 card and no http(s) endpoint. They remain resolvable by id."
+        )
+    return entries, omitted, withheld
+
+
+#: How many entries one org may contribute to an Index agentic-search response.
+#:
+#: The Index slices every fan-out response to its own ``perOrgLimit`` (10, see
+#: ``registryFanout.ts``), so entry 11 is bytes nobody reads — and the whole
+#: fan-out leg has a 2500 ms budget. Capping here rather than relying on the
+#: Index's slice keeps the response small for every other consumer too.
+AGENT_SEARCH_LIMIT = 10
+
+#: Query terms are the non-empty runs between non-word characters, ASCII-only.
+#:
+#: ``re.ASCII`` is not an oversight: the Index tokenizes with JavaScript
+#: ``query.toLowerCase().split(/\W+/)``, whose ``\W`` is ASCII-only. Python's
+#: default ``\W`` is Unicode-aware, so "café" would be one term here and two
+#: ("caf", "") there — and a term WE keep whole but the Index splits is a term
+#: we can fail to match on while the Index would have matched. Mirroring its
+#: tokenizer keeps this filter from being stricter than the consumer's.
+_QUERY_TERM_SPLIT = re.compile(r"\W+", re.ASCII)
+
+
+def _query_terms(query: str) -> list[str]:
+    """The query, lowercased, as the terms a score is a fraction of."""
+    return [term for term in _QUERY_TERM_SPLIT.split(query.lower()) if term]
+
+
+def _entry_search_text(entry: dict) -> str:
+    """The searchable text of a CatalogEntry: name, description and tags.
+
+    The same three fields the Index scores on (``entryText`` in
+    ``agenticSearch.ts``), so an entry this route keeps is an entry the Index
+    can also score above zero. Note what this means for a MEMBER entry:
+    ``_member_catalog_entry`` hard-codes ``description`` to ``""`` on purpose,
+    so a member is findable by its name and its skills and never by prose.
+    """
+    tags = " ".join(str(tag) for tag in (entry.get("tags") or []))
+    return f"{entry.get('displayName') or ''} {entry.get('description') or ''} {tags}"
+
+
+def _term_overlap_score(text: str, terms: list[str]) -> float:
+    """Fraction of `terms` present in `text` as case-insensitive substrings.
+
+    Deliberately the Index's own ``termOverlapScore`` semantics, reimplemented
+    in six lines of stdlib rather than imported or vendored: the behaviour is
+    worth matching, a copy of somebody else's source is not worth carrying.
+    """
+    if not terms:
+        return 0.0
+    lowered = text.lower()
+    return sum(1 for term in terms if term in lowered) / len(terms)
+
+
+@router.get("/agents/search")
+async def registry_agent_search(request: Request, q: str = "") -> JSONResponse:
+    """Agent search: ``GET /agents/search?q=<query>`` → the matching CatalogEntries.
+
+    **THIS ROUTE IS WHY AN ORG REGISTERED HERE IS FINDABLE AT ALL.** The NANDA
+    Index's ``/api/v1/agentic-search`` ranks orgs locally and then fans out LIVE
+    to ``GET {registry_url}/agents/search?q=...`` for every org registered as
+    ``application/ai-catalog+json``, expanding each response into agent-level
+    candidates. Measured 2026-10-17 against the live index: this route did not
+    exist, so ``/agents/{identifier}`` matched and read ``search`` as an agent
+    id — ``404 {"detail":"agent not found in this registry"}`` — and all three
+    live orgs were reported ``orgsUnreachable``. ``q="space science education
+    outreach"`` returned count 0. The catalog answered 200 in 0.13 s on a direct
+    probe at the same moment, so this was never reachability: the fan-out failed
+    on SHAPE, in 468 ms.
+
+    What the consumer's contract makes non-negotiable (``registryFanout.ts``):
+
+    * The exact path answers 200 DIRECTLY — the fetch uses ``redirect: 'error'``,
+      so a 307 to a trailing-slash twin is a failure. Hence ``/agents/search``,
+      never ``/agents/search/``.
+    * **Any non-2xx, any timeout, any malformed JSON marks the org
+      UNREACHABLE.** An empty result is therefore ``200`` with ``entries: []``,
+      never a 404 and never a 400. Being dropped from discovery for having
+      nothing to say is the same failure as not answering at all.
+    * Entries are the camelCase ``RemoteCatalogEntry``, and **identifiers stay
+      BARE**: the Index's ``qualifyIdentifier`` anchors a bare id to the domain
+      whose ownership it verified (``urn:air:<domain>:agent:<id>``). Minting our
+      own anchor would anchor to a value nobody checked.
+
+    And it is DECLARED ABOVE ``/agents/{identifier}``, which is load-bearing:
+    Starlette matches in declaration order, so the catch-all below would swallow
+    this path again. ``test_agent_search.py`` pins the order by behaviour.
+    One consequence, stated rather than discovered later: an agent whose
+    identifier is literally ``search`` is no longer reachable at
+    ``/agents/search``. The path is the contract.
+
+    ⚠️ **THE MEMBER GATE IS THE CATALOG'S, THROUGH THE SAME HELPER.** The
+    fan-out is UNAUTHENTICATED. Returning member entries to it anonymously would
+    reopen precisely what closing the member list closed. So an anonymous caller
+    sees this org's own entry and nothing else unless
+    ``ORG_PUBLIC_MEMBER_CATALOG`` is on, and ``withheldMembers`` says so.
+
+    **The product consequence, said out loud:** an org that does not publish its
+    members publicly is discoverable on the Index as ONE agent, not as its
+    roster. That is correct, it is a limit of the privacy default and not a bug,
+    and there is deliberately no bypass.
+
+    No network I/O: everything is built from ``ca.members`` and the published-card
+    record, inside a 2500 ms budget that belongs to the Index, not to us.
+    """
+    # Same read as the catalog's, for the same reason: request.state is set by
+    # the middleware only after a real signature check (/agents/search is in
+    # auth_verify.IDENTITY_AWARE_OPEN_PATHS, which populates identity on an open
+    # path and never gates it), and going through the `ca` proxy breaks the
+    # standalone unit tests.
+    caller = getattr(request.state, "agent_id", "") or ""
+    entries, omitted, withheld = _gated_catalog_entries(caller, surface="/agents/search")
+
+    terms = _query_terms(q)
+    if terms:
+        # A query that matches nothing returns NOTHING — dropping the zero-score
+        # entries is what makes that true. Without it a nonsense query answers
+        # with the whole catalog, every org looks like a match for everything,
+        # and the ranking the Index does downstream is fed noise.
+        scored = [(_term_overlap_score(_entry_search_text(e), terms), e) for e in entries]
+        # Stable sort: equal scores keep catalog order, so the org's own entry
+        # stays ahead of its members and the response is deterministic.
+        ranked = [entry for score, entry in sorted(scored, key=lambda p: p[0], reverse=True) if score > 0]
+    else:
+        # Blank or missing q = no filter. This surface's failure mode is being
+        # silently dropped from discovery, so it errs toward answering.
+        ranked = entries
+
+    return JSONResponse(
+        content={
+            "specVersion": "1.0",
+            "entries": ranked[:AGENT_SEARCH_LIMIT],
+            "omittedMembers": omitted,
+            "withheldMembers": withheld,
+        },
+        media_type="application/ai-catalog+json",
+    )
+
+
 @router.get("/agents/{identifier}")
 async def registry_agent_record(identifier: str) -> JSONResponse:
     """Registry hop: ``GET /agents/<id>`` → CatalogEntry.
@@ -367,24 +543,9 @@ async def ai_catalog(request: Request) -> JSONResponse:
     # KeyError('chapter_agent'). The value is the same one the middleware sets,
     # and only ever on a verified signature.
     caller = getattr(request.state, "agent_id", "") or ""
-    public_members = publishes_members_publicly()
-    entries = [_org_catalog_entry()]
-    omitted = 0
-    withheld = 0
-    for member_id, member in ca.members.items():
-        if not caller and not public_members:
-            withheld += 1
-            continue
-        entry = _member_catalog_entry(member_id, member)
-        if entry is not None:
-            entries.append(entry)
-        else:
-            omitted += 1
-    if omitted:
-        print(
-            f"[catalog] {omitted} member(s) omitted from /.well-known/ai-catalog.json — "
-            f"no published host39 card and no http(s) endpoint. They remain resolvable by id."
-        )
+    # Shared with GET /agents/search — see _gated_catalog_entries for why the
+    # member gate has exactly one implementation across both hops.
+    entries, omitted, withheld = _gated_catalog_entries(caller, surface="/.well-known/ai-catalog.json")
     return JSONResponse(
         content={
             "specVersion": "1.0",
@@ -394,8 +555,6 @@ async def ai_catalog(request: Request) -> JSONResponse:
         },
         media_type="application/ai-catalog+json",
     )
-
-
 
 
 @router.get("/.well-known/conformance.json")
