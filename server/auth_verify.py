@@ -962,8 +962,20 @@ def is_admin_bearer_path(method: str, path: str) -> bool:
 #: to derive the tier from a request header the caller could set themselves;
 #: adding them here is what makes request.state.verified — set only after a
 #: real signature check — the thing they read instead.
+#:
+#: GET /agents/search is the NANDA Index's agentic-search fan-out leg. It
+#: serves the SAME population as the catalog under the SAME member gate, so it
+#: needs the same ability to tell a signed member from a stranger — without it
+#: the gate could only ever be opened by ORG_PUBLIC_MEMBER_CATALOG and a
+#: verified caller would be indistinguishable from the anonymous index.
 IDENTITY_AWARE_OPEN_PATHS = frozenset(
-    {"/.well-known/ai-catalog.json", "/api/portal/layout", "/api/sessions", "/api/runtimes"}
+    {
+        "/.well-known/ai-catalog.json",
+        "/agents/search",
+        "/api/portal/layout",
+        "/api/sessions",
+        "/api/runtimes",
+    }
 )
 
 
