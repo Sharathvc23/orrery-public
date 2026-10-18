@@ -321,6 +321,21 @@ def test_omitted_and_withheld_are_never_folded_together(client, monkeypatch):
     assert (anonymous["omittedMembers"], anonymous["withheldMembers"]) == (0, 3)
 
 
+def test_the_fan_out_surface_does_not_log_a_line_per_index_query(client, monkeypatch, capsys):
+    """The Index fans out to this route on EVERY agentic-search, probe leg
+    included, so the catalog's omission log would become one line per query per
+    omitted member — measured as 20 on the live astrocity org 2026-10-18. The
+    count stays in the response body, which is the diagnosable part; the catalog
+    is the document a human fetches and it keeps the log."""
+    monkeypatch.setenv(_FLAG, "1")
+    doc = _search(client)
+    assert doc["omittedMembers"] == 1, "nothing was omitted, so nothing was proved"
+    assert "omitted" not in capsys.readouterr().out
+
+    assert client.get("/.well-known/ai-catalog.json").status_code == 200
+    assert "omitted" in capsys.readouterr().out, "the catalog lost its omission log"
+
+
 def test_both_counts_are_always_present_so_zero_differs_from_absent(client, monkeypatch):
     monkeypatch.setenv(_FLAG, "1")
     monkeypatch.setattr(sys.modules["chapter_agent"], "members", {})

@@ -299,7 +299,7 @@ def _registry_aliases() -> set[str]:
     return {c.lower() for c in candidates if c}
 
 
-def _gated_catalog_entries(caller: str, *, surface: str) -> tuple[list[dict], int, int]:
+def _gated_catalog_entries(caller: str, *, log_surface: str | None) -> tuple[list[dict], int, int]:
     """Every CatalogEntry `caller` may see, plus the two counts, kept apart.
 
     ONE implementation behind BOTH unauthenticated hops into this population —
@@ -317,6 +317,16 @@ def _gated_catalog_entries(caller: str, *, surface: str) -> tuple[list[dict], in
     decision indistinguishable from an unpublished card, and
     ``member_listing.consenting_entries`` says why a count must not be read as a
     consent signal either: these are neither.
+
+    ``log_surface`` names the document for the omission log, or is None to skip
+    it. ``/agents/search`` passes None ON PURPOSE: the Index fans out to it on
+    EVERY agentic-search — including the probe leg, which queries live catalogs
+    the query never matched — so an org with omitted members would emit a line
+    per index query forever. Measured on the live astrocity org 2026-10-18:
+    ``omittedMembers`` is 20 there, so that is 20 lines a query, not one. The
+    count is in the response body of both documents either way, which is the
+    diagnosable part; the log is for an operator reading stdout, and the catalog
+    is the document a human fetches.
     """
     public_members = publishes_members_publicly()
     entries = [_org_catalog_entry()]
@@ -331,9 +341,9 @@ def _gated_catalog_entries(caller: str, *, surface: str) -> tuple[list[dict], in
             entries.append(entry)
         else:
             omitted += 1
-    if omitted:
+    if omitted and log_surface:
         print(
-            f"[catalog] {omitted} member(s) omitted from {surface} — "
+            f"[catalog] {omitted} member(s) omitted from {log_surface} — "
             f"no published host39 card and no http(s) endpoint. They remain resolvable by id."
         )
     return entries, omitted, withheld
@@ -446,7 +456,7 @@ async def registry_agent_search(request: Request, q: str = "") -> JSONResponse:
     # path and never gates it), and going through the `ca` proxy breaks the
     # standalone unit tests.
     caller = getattr(request.state, "agent_id", "") or ""
-    entries, omitted, withheld = _gated_catalog_entries(caller, surface="/agents/search")
+    entries, omitted, withheld = _gated_catalog_entries(caller, log_surface=None)
 
     terms = _query_terms(q)
     if terms:
@@ -545,7 +555,7 @@ async def ai_catalog(request: Request) -> JSONResponse:
     caller = getattr(request.state, "agent_id", "") or ""
     # Shared with GET /agents/search — see _gated_catalog_entries for why the
     # member gate has exactly one implementation across both hops.
-    entries, omitted, withheld = _gated_catalog_entries(caller, surface="/.well-known/ai-catalog.json")
+    entries, omitted, withheld = _gated_catalog_entries(caller, log_surface="/.well-known/ai-catalog.json")
     return JSONResponse(
         content={
             "specVersion": "1.0",

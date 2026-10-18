@@ -57,6 +57,18 @@ removing `/agents/search` from `IDENTITY_AWARE_OPEN_PATHS` reddened
 treating every caller as entitled at the search handler's own call site reddened
 the five member-gate tests in this suite and no test outside it.
 
+The omission log stays on the catalog and is deliberately absent from
+`/agents/search`: the Index fans out to that route on every agentic-search,
+probe leg included, so an org with omitted members would emit a line per query
+per member — measured as `omittedMembers: 20` on the live astrocity org
+2026-10-18. The count is in both documents' response bodies either way.
+
 Not verified here, and it is the acceptance test: that one of our orgs appears in
 a live `api.nandaindex.org` agentic-search result and leaves `orgsUnreachable`.
-That needs a redeploy of the orgs.
+That needs a redeploy of the orgs. Re-measured 2026-10-18, so the gap is
+current and not stale: `q="intelligent automation for business"` still returns
+`orgsUnreachable: ["rocketbrain"]` and `q="space science education outreach"`
+still returns count 0 with `orgsUnreachable: ["astrocity"]`, and all three live
+orgs still answer `404` at `/agents/search`. Their member catalogs report
+`withheldMembers: 0`, so the member flag is not what is missing — only the
+deploy is.
