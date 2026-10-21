@@ -606,6 +606,34 @@ async def test_resync_does_not_blank_a_description_it_does_not_have(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_resync_reports_success_when_the_write_lands_but_the_body_is_not_json(monkeypatch) -> None:
+    """A 200 IS the write landing. If the body cannot be parsed the report must
+    say less about it, not claim the write failed — telling an operator to retry
+    a PUT that already succeeded is worse than an unreported field."""
+    import nanda_registry
+
+    class _Unparseable(_FakeResp):
+        def json(self):
+            raise ValueError("not json")
+
+    routes = {
+        "/auth/login": _FakeResp(200, {"token": "JWT"}),
+        f"/api/v1/orgs/{_AGENT_ID}": lambda body, headers: (
+            _Unparseable(200)
+            if body is not None
+            else _FakeResp(200, {"tags": ["general ai"], "description": "A demo org"})
+        ),
+    }
+    _install_index_v2(monkeypatch, routes)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["ok"] is True and result["status"] == "resynced"
+    assert result["fields"] == ["tags"]
+    assert result["tags_after"] is None  # unknown, not invented
+    assert result["representative_queries"] == []
+
+
+@pytest.mark.asyncio
 async def test_resync_unconfigured_makes_no_call(monkeypatch) -> None:
     import nanda_registry
 

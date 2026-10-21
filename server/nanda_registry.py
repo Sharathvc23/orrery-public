@@ -543,7 +543,15 @@ async def resync_index_record() -> dict:
                     "detail": (getattr(r, "text", "") or "")[:200],
                 }
 
-            updated = r.json() if isinstance(r.json(), dict) else {}
+            # Parse ONCE, defensively. A 200 whose body is not JSON would
+            # otherwise raise out to the generic handler and be reported as
+            # "error" — telling the operator the write failed when it
+            # succeeded, which is worse than saying less about it.
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            updated = body if isinstance(body, dict) else {}
             _update_status(f"index:{index_url}", True, "resynced")
             return {
                 "ok": True,
