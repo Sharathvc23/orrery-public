@@ -323,12 +323,21 @@ class _FakeClient:
     async def __aexit__(self, *a):
         return False
 
-    async def post(self, url, json=None, headers=None, timeout=None):
-        self._calls.append(("POST", url, json, headers))
+    def _answer(self, method, url, body, headers):
+        self._calls.append((method, url, body, headers))
         for suffix, resp in self._routes.items():
             if url.endswith(suffix):
-                return resp(json, headers) if callable(resp) else resp
+                return resp(body, headers) if callable(resp) else resp
         return _FakeResp(404, text="no route")
+
+    async def post(self, url, json=None, headers=None, timeout=None):
+        return self._answer("POST", url, json, headers)
+
+    async def get(self, url, headers=None, timeout=None):
+        return self._answer("GET", url, None, headers)
+
+    async def put(self, url, json=None, headers=None, timeout=None):
+        return self._answer("PUT", url, json, headers)
 
 
 def _install_index_v2(monkeypatch, routes: dict):
@@ -395,18 +404,258 @@ async def test_register_v2_logs_in_when_account_exists(monkeypatch) -> None:
     assert orgs_call[3]["Authorization"] == "Bearer JWT-LOGIN"
 
 
+# ── A 409 on re-registration: three outcomes, not one ──────────────────────
+#
+# This block replaces a single test that asserted ``ok is True`` with the
+# comment "re-trigger is a no-op success". That was the defect written down as
+# intent. A 409 proves only that the org_id is TAKEN; whether the record behind
+# it still matches what the org serves is a SEPARATE, CHECKABLE fact, and
+# conflating them kept all three live orgs advertising a June placeholder for
+# four months while every re-trigger reported success. Measured 2026-10-21.
+#
+# The tags the fake index returns below are the real measured values:
+# ["general ai"] is the default AGENT_FOCUS frozen at registration.
+
+
 @pytest.mark.asyncio
-async def test_register_v2_org_conflict_is_idempotent(monkeypatch) -> None:
+async def test_register_v2_org_conflict_that_matches_is_a_real_success(monkeypatch) -> None:
+    """In sync IS success — the fix must not cry wolf on a correct record."""
     import nanda_registry
 
     routes = {
         "/auth/register": _FakeResp(201, {"token": "JWT"}),
         "/api/v1/orgs": _FakeResp(409, {"error": "CONFLICT", "detail": "taken"}),
+        # _install_index_v2 sets _agent_focus="datetime, web-fetch"
+        f"/api/v1/orgs/{_AGENT_ID}": _FakeResp(
+            200, {"tags": ["datetime", "web-fetch"], "description": "A demo org"}
+        ),
     }
     _install_index_v2(monkeypatch, routes)
     result = await nanda_registry.register_on_index_v2()
     assert result["ok"] is True
-    assert result["status"] == "exists"  # re-trigger is a no-op success
+    assert result["status"] == "exists"
+
+
+@pytest.mark.asyncio
+async def test_register_v2_org_conflict_with_a_stale_record_is_not_a_success(monkeypatch) -> None:
+    """THE REGRESSION GUARD. A caller reading ``ok`` must not be told nothing
+    is wrong while the index advertises something the org stopped serving."""
+    import nanda_registry
+
+    routes = {
+        "/auth/register": _FakeResp(201, {"token": "JWT"}),
+        "/api/v1/orgs": _FakeResp(409, {"error": "CONFLICT", "detail": "taken"}),
+        f"/api/v1/orgs/{_AGENT_ID}": _FakeResp(
+            200, {"tags": ["general ai"], "description": "A demo org"}
+        ),
+    }
+    _install_index_v2(monkeypatch, routes)
+    result = await nanda_registry.register_on_index_v2()
+    assert result["ok"] is False
+    assert result["status"] == "stale"
+    assert result["fields"] == ["tags"]
+    # Must name the operation that CAN fix it: registration cannot.
+    assert "/admin/api/index-v2/resync" in result["detail"]
+
+
+@pytest.mark.asyncio
+async def test_register_v2_org_conflict_with_an_unreadable_record_is_unverifiable(monkeypatch) -> None:
+    """Unknown is its own answer. A failed read must not be reported as either
+    in-sync or stale — and must NOT be treated as a record with no fields,
+    which would claim drift on everything."""
+    import nanda_registry
+
+    routes = {
+        "/auth/register": _FakeResp(201, {"token": "JWT"}),
+        "/api/v1/orgs": _FakeResp(409, {"error": "CONFLICT", "detail": "taken"}),
+        f"/api/v1/orgs/{_AGENT_ID}": _FakeResp(503, text="upstream down"),
+    }
+    _install_index_v2(monkeypatch, routes)
+    result = await nanda_registry.register_on_index_v2()
+    assert result["ok"] is False
+    assert result["status"] == "unverifiable"
+    assert "UNKNOWN" in result["detail"]
+
+
+# ── resync_index_record ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_resync_sends_only_the_fields_that_differ(monkeypatch) -> None:
+    """The index rejects an unknown update key wholesale, and a field that
+    matches is a write that changes nothing."""
+    import nanda_registry
+
+    routes = {
+        "/auth/login": _FakeResp(200, {"token": "JWT-LOGIN"}),
+        f"/api/v1/orgs/{_AGENT_ID}": lambda body, headers: (
+            _FakeResp(200, {"tags": ["datetime", "web-fetch"], **(body or {})})
+            if body is not None
+            else _FakeResp(
+                200,
+                {
+                    "tags": ["general ai"],
+                    "description": "A demo org",  # matches _agent_description
+                    "identifier": "urn:air:orrery-demo.test:catalog:root",
+                },
+            )
+        ),
+    }
+    calls = _install_index_v2(monkeypatch, routes)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["ok"] is True and result["status"] == "resynced"
+    assert result["fields"] == ["tags"]  # description matched, so NOT sent
+
+    put = next(c for c in calls if c[0] == "PUT")
+    body = put[2]
+    assert set(body) == {"tags"}, f"sent an unaccepted field: {sorted(body)}"
+    assert body["tags"] == ["datetime", "web-fetch"]
+    assert put[3]["Authorization"] == "Bearer JWT-LOGIN"
+
+
+@pytest.mark.asyncio
+async def test_resync_never_registers_when_login_fails(monkeypatch) -> None:
+    """The 2026-10-20 stray-account bug. A resync acts on a record that already
+    exists, so register-on-failure cannot help and DID create a stray
+    unverified account — it answers "needs verifying" by creating something."""
+    import nanda_registry
+
+    routes = {"/auth/login": _FakeResp(401, {"error": "UNAUTHORIZED"})}
+    calls = _install_index_v2(monkeypatch, routes)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["ok"] is False and result["status"] == "auth_failed"
+    assert not any("/auth/register" in c[1] for c in calls), "resync must never register"
+    assert not any(c[0] == "PUT" for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_resync_writes_nothing_when_the_record_cannot_be_read(monkeypatch) -> None:
+    """An unreadable record is UNKNOWN, not empty. Treating a failed fetch as
+    a record with no fields would make every transient error an overwrite."""
+    import nanda_registry
+
+    routes = {
+        "/auth/login": _FakeResp(200, {"token": "JWT"}),
+        f"/api/v1/orgs/{_AGENT_ID}": _FakeResp(503, text="down"),
+    }
+    calls = _install_index_v2(monkeypatch, routes)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["ok"] is False and result["status"] == "unreadable"
+    assert not any(c[0] == "PUT" for c in calls), "wrote on an unknown remote state"
+
+
+@pytest.mark.asyncio
+async def test_resync_in_sync_makes_no_write(monkeypatch) -> None:
+    import nanda_registry
+
+    routes = {
+        "/auth/login": _FakeResp(200, {"token": "JWT"}),
+        f"/api/v1/orgs/{_AGENT_ID}": _FakeResp(
+            200, {"tags": ["datetime", "web-fetch"], "description": "A demo org"}
+        ),
+    }
+    calls = _install_index_v2(monkeypatch, routes)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["ok"] is True and result["status"] == "in_sync"
+    assert not any(c[0] == "PUT" for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_resync_reports_the_identifier_either_side_of_the_write(monkeypatch) -> None:
+    """Every agent URN is anchored under the org's identifier, and the index
+    rewrites that field on EVERY update. If a PUT ever re-mints it the whole
+    catalog is orphaned, so the result must carry both values to be compared
+    rather than an ``ok`` to be trusted."""
+    import nanda_registry
+
+    urn = "urn:air:orrery-demo.test:catalog:root"
+    routes = {
+        "/auth/login": _FakeResp(200, {"token": "JWT"}),
+        f"/api/v1/orgs/{_AGENT_ID}": lambda body, headers: _FakeResp(
+            200,
+            {"tags": ["datetime", "web-fetch"] if body else ["general ai"], "identifier": urn},
+        ),
+    }
+    _install_index_v2(monkeypatch, routes)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["identifier_before"] == urn
+    assert result["identifier_after"] == urn
+
+
+@pytest.mark.asyncio
+async def test_resync_does_not_blank_a_description_it_does_not_have(monkeypatch) -> None:
+    import nanda_registry
+
+    routes = {
+        "/auth/login": _FakeResp(200, {"token": "JWT"}),
+        f"/api/v1/orgs/{_AGENT_ID}": lambda body, headers: _FakeResp(
+            200, {"tags": ["datetime", "web-fetch"], "description": "set by hand on the index"}
+        ),
+    }
+    calls = _install_index_v2(monkeypatch, routes)
+    monkeypatch.setattr(nanda_registry, "_agent_description", "")
+
+    result = await nanda_registry.resync_index_record()
+    assert result["status"] == "in_sync"
+    assert not any(c[0] == "PUT" for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_resync_reports_success_when_the_write_lands_but_the_body_is_not_json(monkeypatch) -> None:
+    """A 200 IS the write landing. If the body cannot be parsed the report must
+    say less about it, not claim the write failed — telling an operator to retry
+    a PUT that already succeeded is worse than an unreported field."""
+    import nanda_registry
+
+    class _Unparseable(_FakeResp):
+        def json(self):
+            raise ValueError("not json")
+
+    routes = {
+        "/auth/login": _FakeResp(200, {"token": "JWT"}),
+        f"/api/v1/orgs/{_AGENT_ID}": lambda body, headers: (
+            _Unparseable(200)
+            if body is not None
+            else _FakeResp(200, {"tags": ["general ai"], "description": "A demo org"})
+        ),
+    }
+    _install_index_v2(monkeypatch, routes)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["ok"] is True and result["status"] == "resynced"
+    assert result["fields"] == ["tags"]
+    assert result["tags_after"] is None  # unknown, not invented
+    assert result["representative_queries"] == []
+
+
+@pytest.mark.asyncio
+async def test_resync_unconfigured_makes_no_call(monkeypatch) -> None:
+    import nanda_registry
+
+    calls = _install_index_v2(monkeypatch, {})
+    monkeypatch.delenv("ORG_DOMAIN", raising=False)
+
+    result = await nanda_registry.resync_index_record()
+    assert result["ok"] is False and result["status"] == "unconfigured"
+    assert calls == []
+
+
+def test_tags_are_derived_once_not_restated() -> None:
+    """``_served_index_fields`` must be the ONLY place the registration body
+    derives tags. Two copies of the transform is how the index's copy and the
+    served card came to disagree in the first place."""
+    import inspect
+
+    import nanda_registry
+
+    src = inspect.getsource(nanda_registry.register_on_index_v2)
+    assert "_served_index_fields()" in src, "registration no longer shares the derivation"
+    assert "_agent_focus.split" not in src, "registration re-derives tags instead of sharing"
 
 
 @pytest.mark.asyncio

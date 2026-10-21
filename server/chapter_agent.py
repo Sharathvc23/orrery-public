@@ -9648,6 +9648,29 @@ async def admin_register_index_v2(request: Request) -> JSONResponse:
     return JSONResponse(content=result)
 
 
+@app.post("/admin/api/index-v2/resync")
+async def admin_resync_index_v2(request: Request) -> JSONResponse:
+    """Operator-gated trigger: push this org's SERVED description/tags over the
+    index's stored copy.
+
+    The index keeps a COPY of those fields taken at registration, and
+    ``/admin/api/index-v2/register`` cannot refresh it — a re-trigger gets a
+    409. Tags carry the highest weight in the index's org search vector and org
+    ranking is a hard relevance filter, so a stale copy decides whether this org
+    is found at all, not merely how it is described.
+
+    Admin-gated (signed did:key OR bearer), same as the register trigger: it
+    writes to a live index record. Returns the fields sent and the tags/
+    identifier before and after, so the caller can see what changed rather than
+    trust an ``ok``.
+    """
+    ok, _identity, denied = await _authorize_admin(request)
+    if not ok:
+        return _deny_fallback(denied)
+    result = await nanda_registry.resync_index_record()
+    return JSONResponse(content=result)
+
+
 @app.post("/admin/api/grants")
 async def admin_issue_grant(request: Request) -> JSONResponse:
     """Issue a BOUNDED operational grant — the middle option between approving

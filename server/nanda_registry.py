@@ -398,6 +398,183 @@ async def _index_v2_token(client, index_url: str, email: str, password: str, dis
     return ""
 
 
+def _served_index_fields() -> dict:
+    """The index-facing fields as this org SERVES them right now.
+
+    Same transform as the registration body below and as the root catalog entry
+    in ``routes/identity.py`` — ``AGENT_FOCUS`` split on commas and lowercased —
+    so there is one derivation of "our tags", not three. The ``[:20]`` cap
+    matches the index's update schema (``maxItems: 20``): truncating here beats
+    a 400 there.
+    """
+    return {
+        "description": _agent_description,
+        "tags": [s.strip().lower() for s in _agent_focus.split(",") if s.strip()][:20],
+    }
+
+
+def _index_record_drift(remote: dict) -> dict:
+    """The fields where the index's stored COPY differs from what we serve.
+
+    Tags compare as ORDERED lists. The index stores an array, so a reordering
+    is a real difference in the record — but comparing as sets would call a
+    reorder "in sync", and comparing unnormalised strings would call a
+    case change drift forever. Both sides go through the same transform first.
+    """
+    served = _served_index_fields()
+    remote_tags = [str(t).strip().lower() for t in (remote.get("tags") or [])]
+    drift: dict = {}
+    if served["tags"] != remote_tags:
+        drift["tags"] = served["tags"]
+    # Only push a description we actually have: an empty AGENT_DESCRIPTION must
+    # not blank a description someone set on the index by hand.
+    if served["description"] and served["description"] != (remote.get("description") or ""):
+        drift["description"] = served["description"]
+    return drift
+
+
+async def _index_v2_login_token(client, index_url: str, email: str, password: str) -> str:
+    """Obtain a JWT by LOGIN ONLY — never ``/auth/register``.
+
+    A resync acts on a record that already exists, so registering could not
+    help. And a register-on-failure fallback is precisely what created a stray
+    unverified account on 2026-10-20: it makes "this account needs verifying"
+    indistinguishable from "this account does not exist", and answers the wrong
+    one by creating something.
+    """
+    r = await client.post(f"{index_url}/auth/login", json={"email": email, "password": password})
+    if r.status_code == 200:
+        return r.json().get("token", "")
+    return ""
+
+
+async def _fetch_index_record(client, index_url: str, token: str, org_id: str) -> dict | None:
+    """This org's stored index record, or None if it could not be READ.
+
+    None means unknown, never "empty" — the caller must not read a failed
+    fetch as a record with no fields, which would report drift on everything.
+    """
+    try:
+        r = await client.get(
+            f"{index_url}/api/v1/orgs/{org_id}", headers={"Authorization": f"Bearer {token}"}
+        )
+        if r.status_code != 200:
+            return None
+        body = r.json()
+        return body if isinstance(body, dict) else None
+    except Exception:
+        return None
+
+
+async def resync_index_record() -> dict:
+    """Push this org's SERVED identity over the index's stored copy.
+
+    The index keeps a COPY of ``description``/``tags`` taken at registration,
+    and ``register_on_index_v2`` cannot refresh it: a re-trigger gets 409. So
+    the copy drifts the moment ``AGENT_FOCUS`` changes, and it drifts silently.
+
+    That is not cosmetic. In the index's ``organizations_search_vector`` tags
+    carry the HIGHEST weight ('A'), and org ranking is a hard relevance filter
+    (``search_vector @@ to_tsquery``), so a stale copy decides whether this org
+    is ranked in for a query AT ALL. Measured 2026-10-21 across all three live
+    orgs: each still advertised the default ``["general ai"]`` from June while
+    serving real tags, and a query matching only the real tags ranked NO org in
+    — the agents were published, durable and unreachable.
+
+    Sends ONLY the fields that actually differ, and only fields the index's
+    update schema accepts: an unknown key is rejected wholesale there.
+    """
+    cfg = _index_v2_config()
+    if not cfg or not cfg["index_url"]:
+        return {
+            "ok": False,
+            "status": "unconfigured",
+            "detail": "set NANDA_INDEX_URL + INDEX_ACCOUNT_EMAIL + INDEX_ACCOUNT_PASSWORD + ORG_DOMAIN",
+        }
+    index_url, org_id = cfg["index_url"], cfg["org_id"]
+    try:
+        async with httpx.AsyncClient(timeout=_INDEX_V2_TIMEOUT) as client:
+            token = await _index_v2_login_token(client, index_url, cfg["email"], cfg["password"])
+            if not token:
+                _update_status(f"index:{index_url}", False, "auth_failed")
+                return {
+                    "ok": False,
+                    "status": "auth_failed",
+                    "org_id": org_id,
+                    "detail": f"login failed for {cfg['email']} — no account was created",
+                }
+
+            remote = await _fetch_index_record(client, index_url, token, org_id)
+            if remote is None:
+                _update_status(f"index:{index_url}", False, "record_unreadable")
+                return {
+                    "ok": False,
+                    "status": "unreadable",
+                    "org_id": org_id,
+                    "detail": (
+                        f"could not read the index record for {org_id}; whether it matches what "
+                        "this org serves is UNKNOWN, so nothing was written"
+                    ),
+                }
+
+            drift = _index_record_drift(remote)
+            if not drift:
+                _update_status(f"index:{index_url}", True, "in_sync")
+                return {
+                    "ok": True,
+                    "status": "in_sync",
+                    "org_id": org_id,
+                    "tags": remote.get("tags"),
+                    "detail": "the index record already matches what this org serves",
+                }
+
+            r = await client.put(
+                f"{index_url}/api/v1/orgs/{org_id}",
+                json=drift,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code != 200:
+                _update_status(f"index:{index_url}", False, f"http_{r.status_code}")
+                return {
+                    "ok": False,
+                    "status": f"http_{r.status_code}",
+                    "org_id": org_id,
+                    "fields": sorted(drift),
+                    "detail": (getattr(r, "text", "") or "")[:200],
+                }
+
+            # Parse ONCE, defensively. A 200 whose body is not JSON would
+            # otherwise raise out to the generic handler and be reported as
+            # "error" — telling the operator the write failed when it
+            # succeeded, which is worse than saying less about it.
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            updated = body if isinstance(body, dict) else {}
+            _update_status(f"index:{index_url}", True, "resynced")
+            return {
+                "ok": True,
+                "status": "resynced",
+                "org_id": org_id,
+                "fields": sorted(drift),
+                "tags_before": remote.get("tags"),
+                "tags_after": updated.get("tags"),
+                # The identifier every agent URN is anchored under. The index
+                # rewrites it on every update, so report it rather than assume:
+                # a changed org URN would silently orphan the whole catalog.
+                "identifier_before": remote.get("identifier"),
+                "identifier_after": updated.get("identifier"),
+                # snake_case and omitted when empty, per the index serializer.
+                # Empty is NOT failure: regeneration needs an LLM key there.
+                "representative_queries": updated.get("representative_queries") or [],
+                "detail": f"resynced {', '.join(sorted(drift))} onto the index record",
+            }
+    except Exception as e:
+        _update_status(f"index:{index_url}", False, str(e)[:80])
+        return {"ok": False, "status": "error", "org_id": org_id, "detail": str(e)[:200]}
+
+
 async def register_on_index_v2() -> dict:
     """Register this org on a NANDA Index v2 (hosting_path=registry).
 
@@ -434,8 +611,10 @@ async def register_on_index_v2() -> dict:
                 "contact_email": cfg["contact_email"],
                 "registry_url": _public_url,  # the 4-hop comes back here
                 "media_type": "application/ai-catalog+json",  # org-level catalog type
-                "description": _agent_description,
-                "tags": [s.strip().lower() for s in _agent_focus.split(",") if s.strip()][:20],
+                # ONE derivation of description/tags, shared with the resync.
+                # Two copies of this transform is how the index's stored copy
+                # and the served card came to disagree in the first place.
+                **_served_index_fields(),
             }
             r = await client.post(f"{index_url}/api/v1/orgs", json=body, headers={"Authorization": f"Bearer {token}"})
             if r.status_code == 201:
@@ -450,12 +629,46 @@ async def register_on_index_v2() -> dict:
                 }
             if r.status_code == 409:
                 registered_on_index.add(org_id)
+                # A 409 proves the org_id is TAKEN. It says NOTHING about
+                # whether the record behind it matches what this org serves,
+                # and this function cannot update it (that is what
+                # resync_index_record is for). Returning ok=True here was a
+                # success claim whose truth did not depend on the record being
+                # correct, and it kept three live orgs advertising a June
+                # placeholder for four months while every re-trigger reported
+                # success. So CHECK, and report which case this is.
+                remote = await _fetch_index_record(client, index_url, token, org_id)
+                if remote is None:
+                    _update_status(f"index:{index_url}", False, "record_unreadable")
+                    return {
+                        "ok": False,
+                        "status": "unverifiable",
+                        "org_id": org_id,
+                        "detail": (
+                            "org_id already registered, but its record could not be read — "
+                            "whether it matches what this org serves is UNKNOWN"
+                        ),
+                    }
+                drift = _index_record_drift(remote)
+                if drift:
+                    _update_status(f"index:{index_url}", False, "stale_record")
+                    return {
+                        "ok": False,
+                        "status": "stale",
+                        "org_id": org_id,
+                        "fields": sorted(drift),
+                        "detail": (
+                            "org_id already registered, and the index's copy of "
+                            f"{', '.join(sorted(drift))} differs from what this org serves. "
+                            "Registration CANNOT update it — POST /admin/api/index-v2/resync"
+                        ),
+                    }
                 _update_status(f"index:{index_url}", True, "already_registered")
                 return {
                     "ok": True,
                     "status": "exists",
                     "org_id": org_id,
-                    "detail": "org_id already registered on this index (idempotent re-trigger)",
+                    "detail": "org_id already registered, and its record matches what this org serves",
                 }
             _update_status(f"index:{index_url}", False, f"http_{r.status_code}")
             return {
