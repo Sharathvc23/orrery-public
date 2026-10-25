@@ -26,19 +26,53 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 
+def _client_scheme(request: Request) -> str:
+    """The scheme the CLIENT used, not the scheme of our own last hop.
+
+    Behind a TLS-terminating proxy — Railway, Fly, any ingress — the
+    application leg is plain HTTP, so ``request.url.scheme`` reports ``http``
+    for a request the client made over HTTPS. The proxy records the real one in
+    ``X-Forwarded-Proto``, which may be a comma-separated chain; the first
+    entry is the original client.
+
+    The header is attacker-settable on a direct request, so this is a
+    best-effort fallback only: it affects nothing but the URL echoed back to
+    that one caller, and ``AGENT_PUBLIC_URL`` (consulted by the caller of this
+    function) is the authoritative answer for a real deployment.
+    """
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded in ("http", "https"):
+        return forwarded
+    return request.url.scheme or "http"
+
+
 def _agent_base_url(request: Request) -> str:
     """Compute the externally-visible base URL for this agent.
 
-    Prefers the Host header (so Agent Cards advertise a URL that actually
-    reaches us from wherever the client fetched them) and falls back to
-    localhost:DASHBOARD_PORT for contexts without a request (tests,
-    CLI-time logging).
+    ``AGENT_PUBLIC_URL`` wins when set, because it is the operator's
+    declaration of where this agent is reachable AND it is the same value
+    ``registry.public_endpoint`` already advertises to the org. Routing both
+    through that one function is the point: two independent derivations of "our
+    public URL" is how the served A2A card came to say ``http://`` while the
+    endpoint registered on the org said ``https://``.
+
+    Measured live 2026-10-25: all six astrocity agent services advertised
+    ``url: http://<domain>`` in their agent cards while ``AGENT_PUBLIC_URL``
+    was correctly ``https://<domain>``. A non-``https`` URL is dropped outright
+    by the NANDA Index's entry sanitizer, so the card was advertising an
+    address the index would refuse — and the scheme was wrong for the one
+    reason nothing local could show: it had been read off the proxy's internal
+    hop rather than the client's request.
+
+    Falls back to the Host header (so a card fetched directly still advertises
+    a URL that reaches us), then to localhost:DASHBOARD_PORT for contexts with
+    no request at all (tests, CLI-time logging).
     """
+    from . import registry
+
     host = request.headers.get("host") if request else None
-    scheme = request.url.scheme if request else "http"
-    if host:
-        return f"{scheme}://{host}"
-    return f"http://localhost:{DASHBOARD_PORT}"
+    local = f"{_client_scheme(request)}://{host}" if host else f"http://localhost:{DASHBOARD_PORT}"
+    return registry.public_endpoint(local)
 
 
 # Will be set by create_app()
