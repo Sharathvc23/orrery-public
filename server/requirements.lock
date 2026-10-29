@@ -33,7 +33,7 @@ rich==15.0.0
 rpds-py==2026.6.3
 sm-aae==0.1.0
 sm-arp==0.3.2
-sm-bridge==0.6.0
+sm-bridge==0.10.0
 sm-conformance==0.3.2
 sm-divergence==0.8.0
 sm-federation==0.6.0

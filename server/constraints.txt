@@ -7,12 +7,26 @@
 sm-aae==0.1.0
 sm-arp==0.3.2
 #
-# sm-bridge 0.6.0 (from 0.4.1): maintenance, no security driver. 0.5.0's
-# delegated binding-write surface is consumed by nanda-connect, which Orrery does
-# not use; 0.6.0 adds an opt-in [feed] extra we deliberately do NOT take (see
-# below) and fixes sm_bridge.__version__, which was a hardcoded literal — a 0.5.0
-# install reports '0.4.1' (measured). Orrery never reads that attribute, so the
-# drift is upstream hygiene, not a correctness issue here.
+# sm-bridge 0.10.0 (from 0.6.0): takes the 0.7.0 SECURITY fix, which 0.6.0 predates.
+# 0.7.0 anchored /nanda/resolve: an identifier scoped to a DIFFERENT registry
+# (@other:ns/foo, or a did:web under another host) was reduced to a bare id and
+# answered locally, carrying THIS registry's proof block, with nothing telling the
+# caller the scope had been ignored. Orrery is multi-tenant and mounts that router
+# at /sm-bridge/*, so the fix is the driver for this bump.
+# Also in range: 0.8.0 made the delta log append-only and added conversion
+# `provenance`; 0.9.0 anchored the Index's urn:air: identifiers and added the
+# /agents/search fan-out hop to sm-bridge's OWN gateway; 0.10.0 added an
+# `is_listed` hook to that gateway.
+# Orrery is unaffected by all three of 0.9.0's breaking changes, verified rather
+# than assumed: it does not read the `synthesized` extension field (removed), does
+# not mount sm-bridge's gateway at all (so the A2A card's `_meta.identifier` change
+# cannot reach it — server/routes/identity.py serves this org's catalog and card
+# surfaces itself), and passes member ids rather than URNs to resolve (so the
+# non-lower-case `URN:` now 400ing where it used to 404 is unreachable from here).
+# NOT adopting sm-bridge's gateway or its new `is_listed` hook: _gated_catalog_entries
+# distinguishes OMITTED from WITHHELD, applies the resolvable-card rule and caps at
+# AGENT_SEARCH_LIMIT. A boolean predicate cannot express that, and folding the two
+# counts together is exactly what that code refuses to do.
 # The >=0.4.1 FLOOR in pyproject.toml is deliberately NOT raised: every symbol
 # Orrery imports exists in 0.4.1 with an identical shape (verified by
 # introspection across both wheels), so 0.4.1 remains the honest minimum API.
@@ -41,7 +55,7 @@ sm-arp==0.3.2
 # already: that change's report and conformance/federation/claims.json both cited
 # THIS note as evidence that Orrery could not have a completeness-verifiable feed
 # AT ALL. It never said that. It said this store cannot back one.
-sm-bridge==0.6.0
+sm-bridge==0.10.0
 sm-conformance==0.3.2
 sm-divergence==0.8.0
 # sm-federation + its sm-feed transport dependency. sm-feed is pinned here

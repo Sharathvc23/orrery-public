@@ -41,7 +41,7 @@ sm-locp==0.2.1
 # Future use: serve /sm-bridge/index, /resolve, /deltas alongside
 # existing /agentfacts.json so federation peers and crawlers can
 # discover chapter members via the standard Stellarminds shape.
-sm-bridge==0.6.0
+sm-bridge==0.10.0
 # sm-conformance — signed conformance-badge envelope (build/verify/suite
 # digest). conformance_boot.py mints the org's self-attested boot badge with
 # it; same primitive the agent's badge uses.
