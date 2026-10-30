@@ -8934,7 +8934,7 @@ async def api_version() -> dict:
     }
 
 
-_BUILD_INFO_CACHE: dict[str, str] | None = None
+_BUILD_INFO_CACHE: dict[str, str | bool] | None = None
 
 
 def _local_git(*args: str) -> str:
@@ -8955,7 +8955,7 @@ def _local_git(*args: str) -> str:
     return out.stdout.strip() if out.returncode == 0 else ""
 
 
-def _resolve_build_info() -> dict[str, str]:
+def _resolve_build_info() -> dict[str, str | bool]:
     """Resolve the running build's commit / branch / timestamp — the SAME
     provenance for /version AND /health (so the stale-deploy signal exists
     where orchestrators poll).
