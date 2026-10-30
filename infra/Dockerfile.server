@@ -61,8 +61,22 @@ ENV PYTHONPATH=/app/server:/app \
 # stale-deploy failure mode from the PR postmortem. Declared late so a new
 # commit doesn't bust the pip-install layer cache. Defaults to "unknown" for an
 # un-stamped local build.
-ARG GIT_COMMIT=unknown
-ARG GIT_BRANCH=unknown
+#
+# A github-connected Railway build passes no --build-arg, so it used to land on
+# "unknown" — which is how /health ended up honest-but-useless after the stale
+# APP_GIT_COMMIT service variable was cleared. Railway does expose the commit to
+# the BUILDER (it is absent at runtime), so GIT_COMMIT now falls back to it. The
+# resulting value is baked into the image, which is the one source that cannot
+# drift from the code it describes: a service variable sticks across rebuilds, and
+# a runtime lookup needs something to look up.
+#
+# Precedence, highest first: an explicit --build-arg (CI/compose keep working and
+# the e2e provenance step depends on it), then Railway's builder value, then
+# "unknown" — honest rather than asserted.
+ARG RAILWAY_GIT_COMMIT_SHA=""
+ARG RAILWAY_GIT_BRANCH=""
+ARG GIT_COMMIT=${RAILWAY_GIT_COMMIT_SHA:-unknown}
+ARG GIT_BRANCH=${RAILWAY_GIT_BRANCH:-unknown}
 ARG BUILD_TIMESTAMP=unknown
 ENV GIT_COMMIT=$GIT_COMMIT \
     GIT_BRANCH=$GIT_BRANCH \
