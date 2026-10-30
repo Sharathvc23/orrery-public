@@ -13,6 +13,21 @@ WORKDIR /app
 # --require-hashes makes pip refuse any artifact the lock did not name, so a
 # build of this commit installs the same tree today and in six months.
 COPY index/requirements.lock /app/index-requirements.lock
+
+# pip 26.2.2, pinned by artifact hash. Every pip BEFORE 26.2.2 keeps trusting the
+# eMudhra/emSign intermediates whose private keys turned out to be recoverable
+# (Oct 2026), regardless of the system trust store.
+#
+# This image is the least exposed of the four, because `--require-hashes` below
+# already verifies every artifact by digest, so a swapped download fails the hash
+# check whatever the TLS chain said. Upgraded anyway: that exemption holds only
+# while every install here stays hash-pinned, which is a property of the next edit
+# to this file rather than of this one.
+#
+# The `#sha256=` fragment makes the bootstrap safe: this download is performed by
+# the OLD pip, so the artifact is verified by HASH rather than by the TLS chain.
+RUN pip install --no-cache-dir "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+
 RUN pip install --no-cache-dir --require-hashes -r /app/index-requirements.lock
 
 COPY index/ /app/index/
