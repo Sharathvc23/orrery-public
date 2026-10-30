@@ -9021,10 +9021,28 @@ def _resolve_build_info() -> dict[str, str]:
     build_ts = build_ts or _env("BUILD_TIMESTAMP")
 
     # 4. platform provenance — github-connected Railway deploys only
+    rw_sha = _env("RAILWAY_GIT_COMMIT_SHA")
     if not commit:
-        rw_sha = _env("RAILWAY_GIT_COMMIT_SHA")
         commit = rw_sha[:7] if rw_sha else ""
     branch = branch or _env("RAILWAY_GIT_BRANCH")
+
+    # 4b. The two sources can BOTH exist and DISAGREE, and then neither ordering
+    # is right. APP_GIT_COMMIT is the freshest source for a `railway up` upload
+    # (.git is excluded, and the platform var describes the CONNECTED repo's head,
+    # not the tree that was uploaded). But it is a service variable, so it STICKS:
+    # a later github-connected build does not clear it, and the stamp then
+    # describes a deploy that is no longer running.
+    #
+    # Measured on the live org server 2026-10-30: /health reported APP_GIT_COMMIT
+    # e5e1a3e, left by the previous `railway up`, while the running deployment was
+    # 048f745 built from a merge. Preferring the platform var instead would simply
+    # move the same lie to the `railway up` case.
+    #
+    # So when they disagree this does not pick a winner — it says so. A commit
+    # field that might describe either deploy is worse than one that admits it
+    # cannot tell, because the whole point of this chain is catching a stale
+    # deploy. `stale-deploy guard broken` is the failure it exists to surface.
+    provenance_conflict = bool(rw_sha and commit and not rw_sha.startswith(commit[:7]))
 
     # 5. LOCAL DEV ONLY — a real checkout, so `/health` is accurate without wiring
     if not commit:
@@ -9038,6 +9056,18 @@ def _resolve_build_info() -> dict[str, str]:
         "git_branch": branch or "unknown",
         "build_timestamp": build_ts or "unknown",
     }
+    if provenance_conflict:
+        # Both named, neither asserted as THE commit. An operator polling /health
+        # for a stale deploy needs to see that the two deploy paths disagree —
+        # that IS the stale-deploy signal, one rung earlier than they expected it.
+        _BUILD_INFO_CACHE["platform_commit"] = rw_sha[:7]
+        _BUILD_INFO_CACHE["provenance_conflict"] = True
+        print(
+            f"[build-info] CONFLICT: stamped commit {commit[:7]} disagrees with the "
+            f"platform's {rw_sha[:7]}. One of a `railway up` upload and a github "
+            f"build is not what is running; /health cannot tell which. Clear the "
+            f"stale APP_GIT_COMMIT service variable to resolve it."
+        )
     return _BUILD_INFO_CACHE
 
 
