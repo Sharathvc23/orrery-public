@@ -46,6 +46,26 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: chore
+    # ⚠️ python 3.15 IS AHEAD OF THE WHEELS THIS IMAGE NEEDS. `asyncpg` (a C
+    # extension) and `jiter` (Rust, pulled in by the openai client) publish no
+    # cp315 wheels, so pip falls back to building both from source and `-slim`
+    # carries no toolchain. Measured on the bump itself: "error: [Errno 2] No
+    # such file or directory: 'gcc'" and "error: linker `cc` not found", with
+    # `installer`, `two-agent demo` and `e2e` red while every setup-python job
+    # stayed green — because only the image builds those two, which is also why
+    # the failure reads as an image problem rather than a dependency one.
+    #
+    # Scoped to `>= 3.15`, NOT to the semver-minor update-type: 3.13 and 3.14 do
+    # ship those wheels, and a blanket minor ignore would hold them back too and
+    # go unnoticed, since a bump that is never proposed leaves no trace. Digest
+    # repins of the current tag are unaffected, which is the half that carries
+    # the security fixes.
+    #
+    # REMOVE BOTH COPIES once asyncpg and jiter ship cp315 — this records their
+    # release calendars, not a decision about this repository.
+    ignore:
+      - dependency-name: python
+        versions: [">= 3.15"]
 
   # ⚠️ The same image pinned in docker-compose.yml. An image bump therefore
   # arrives as TWO pull requests, one per ecosystem, and they MUST LAND
@@ -60,6 +80,16 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: chore
+    # The SAME ignore as the `docker` entry above, and it has to be repeated
+    # here for the reason the warning above this entry already gives: an image
+    # bump arrives as two pull requests that must land together. Ignoring 3.15
+    # in only one ecosystem would leave the other proposing it every week, and
+    # merging that survivor alone is precisely the half-applied pin the two
+    # entries exist to prevent — the green one would be the compose side, whose
+    # renderer service never builds asyncpg or jiter, so it would look mergeable.
+    ignore:
+      - dependency-name: python
+        versions: [">= 3.15"]
 
   # renderer/ carries one devDependency (playwright) and no runtime ones.
   # Monthly: a browser-automation pin that drifts a few weeks is not a risk to
