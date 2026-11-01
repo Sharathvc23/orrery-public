@@ -2899,22 +2899,15 @@ def create_app(config: Config, agent=None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(err)) from err
         return {"registered": True}
 
-    # ─── sm-bridge: NANDA-compatible registry routers ─────────
-    # Mount /sm-bridge/{index,resolve,deltas,tools} so NANDA/NEST can read
-    # this agent's canonical AgentFacts. MUST be mounted before the SPA
-    # catch-all below or the /{full_path} route would shadow it.
-    try:
-        import os as _os
-
-        from . import DASHBOARD_PORT as _DEFAULT_PORT
-        from .sm_bridge_adapter import mount_sm_bridge_routers
-
-        _bridge_base = (
-            _os.environ.get("AGENT_PUBLIC_URL", "").strip().rstrip("/") or f"http://localhost:{_DEFAULT_PORT}"
-        )
-        mount_sm_bridge_routers(app, config=_config, public_url=_bridge_base)
-    except Exception as _e:
-        print(f"[sm_bridge] mount skipped: {_e}")
+    # ─── no sm-bridge registry routers here, deliberately ─────────
+    # /sm-bridge/{index,resolve,deltas,tools} used to be mounted at this point
+    # "so NANDA/NEST can read this agent's canonical AgentFacts". They never
+    # could: LocalAuthMiddleware is deny-by-default over an exact-path
+    # OPEN_ROUTES allowlist, no /sm-bridge/* entry was ever added, and those
+    # consumers hold no local token — so each route answered 401. The document
+    # is already public at GET /agentfacts.json, which IS on the allowlist.
+    # If a registry surface is ever genuinely wanted here, the allowlist
+    # entries have to land WITH the mount, not after it.
 
     # Headless: the agent serves its signed local API (/api/local/*) + the NANDA
     # discovery surfaces. There is no bundled web SPA — render with a client of

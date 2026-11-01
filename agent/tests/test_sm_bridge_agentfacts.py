@@ -1,9 +1,13 @@
 """Phase 1: the sovereign agent emits canonical NANDA AgentFacts via sm-bridge.
 
 Proves projectnanda-compatibility of the agent's identity surface: the
-AgentFacts is the upstream ``SmAgentFacts`` shape (not the old bespoke
-``did:nanda``/``hmac`` document), and the agent exposes sm-bridge's
-``/sm-bridge/{index,resolve}`` registry routers.
+AgentFacts is the upstream ``SmAgentFacts`` shape, not the old bespoke
+``did:nanda``/``hmac`` document, and it is served at ``GET /agentfacts.json``.
+
+The ``/sm-bridge/{index,resolve}`` cases that used to live here went with the
+mount they exercised — ``LocalAuthMiddleware`` answered 401 on every one of
+those routes in a real deployment, so the tests passed against an app the
+middleware was not in front of while production served nothing.
 """
 
 import base64
@@ -58,28 +62,6 @@ def test_agentfacts_endpoint_serves_nanda_shape():
     assert j["id"].startswith("did:key:z")
     assert j["agent_name"] == "alice-agent"
     assert "ed25519" in j["capabilities"]["authentication"]["methods"]
-
-
-def test_sm_bridge_index_lists_self():
-    client = TestClient(create_app(_cfg()))
-    r = client.get("/sm-bridge/index")
-    assert r.status_code == 200
-    j = r.json()
-    assert j["total_count"] == 1
-    assert j["agents"][0]["agent_name"] == "alice-agent"
-
-
-def test_sm_bridge_resolve_self():
-    client = TestClient(create_app(_cfg()))
-    r = client.get("/sm-bridge/resolve", params={"agent": "alice-agent"})
-    assert r.status_code == 200
-    assert r.json()["agent_name"] == "alice-agent"
-
-
-def test_test_prefixed_agent_excluded_from_registry():
-    conv = sm_bridge_adapter.make_self_converter(_cfg("TEST-probe"), "https://x")
-    assert list(conv.list_agents(100, 0)) == []
-    assert conv.get_agent("TEST-probe") is None
 
 
 # ── provider: who OPERATES the endpoint, not who is being hosted ─────────────
