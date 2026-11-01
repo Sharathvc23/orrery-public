@@ -22,17 +22,33 @@ moment it is tracked. The previous version of this check named its two paths by
 hand, which is the same shape as the CVE scan that "once named three by hand and
 missed the rest".
 
-**Two rules, because absence and disagreement are different faults.**
+**The rules, because these are all different faults.**
 
-* *Presence* — each pin must be matched by at least one sibling install source.
-  A pin nothing installs is a claim about nothing.
-* *Agreement* — no sibling may pin that package at a different version. This is
-  the rule that was missing.
+* *Presence* — each pin must appear in the **authoritative runtime lock**, which
+  is `requirements.lock` when the directory has one. Accepting a match in *any*
+  sibling would let a non-runtime source mask a package the install actually
+  omits. Where there is no `requirements.lock`, any sibling satisfies it and the
+  message says which were consulted.
+* *Agreement* — no sibling may pin the package at a different version.
+* *Exactness in the install sources too* — an `sm-*` requirement that is a range,
+  a compatible-release clause or a direct URL reference is reported even when
+  some other sibling holds the matching exact pin. The constraints file being
+  exact is worth nothing if the thing that installs is loose, and a direct
+  artifact reference is a supply-chain decision, not a pin.
+* *Completeness* — an `sm-*` package pinned in an install source with no entry in
+  the constraints file beside it is reported. Checking only the names already in
+  the constraints file means a newly locked package is never examined, so the
+  record silently stops being the record.
 
-A sibling that does not mention the package at all is not a fault: a dev lock
-carries test tooling and is not expected to resolve the runtime set. Requiring
-presence in *every* sibling would redden `agent/requirements-dev.lock`, which
-correctly pins no `sm-*` at all.
+A sibling that does not mention a package at all is not a fault: a dev lock
+carries test tooling and is not expected to resolve the runtime set, so
+`agent/requirements-dev.lock` pins no `sm-*` and stays green.
+
+**Names are normalised per PEP 503** and extras are parsed off, so `sm_bridge`,
+`SM-Bridge` and `sm-bridge[feed]==0.10.0` are all recognised as the same
+distribution. Comparing raw spellings would report a consistent tree as broken,
+or — worse — miss a disagreement because the two files spelled the name
+differently.
 """
 
 from __future__ import annotations
@@ -45,15 +61,28 @@ from pathlib import Path
 
 #: A constraints line must be an exact `sm-*` pin and nothing else. Kept strict:
 #: a range in a file whose whole purpose is exactness is itself the defect.
-CONSTRAINT_LINE = re.compile(r"(sm-[a-z0-9-]+)==(\d+\.\d+\.\d+)$")
+CONSTRAINT_LINE = re.compile(r"(sm-[a-z0-9_.-]+)==(\d+\.\d+\.\d+)$")
 
-#: An install source holds ordinary pins of every shape, so this is deliberately
-#: loose. Applying the strict pattern above to a lock would redden every line in
-#: it that is not an `sm-*` package, which is almost all of them.
-INSTALL_LINE = re.compile(r"([A-Za-z0-9._-]+)==([^\s;#\[\]]+)")
+#: Any requirement in an install source: name, optional extras, then either a
+#: version specifier or a direct reference. Deliberately permissive about the
+#: operator so that a LOOSE `sm-*` requirement is captured and reported rather
+#: than skipped — skipping it is how a range slips past a gate about exactness.
+INSTALL_LINE = re.compile(
+    r"(?P<name>[A-Za-z0-9._-]+)\s*(?P<extras>\[[^\]]*\])?\s*(?P<op>===|==|~=|!=|>=|<=|>|<|@)\s*(?P<rest>.+)$"
+)
 
 #: An install source is a sibling of the constraints file, by name.
 INSTALL_SOURCE = re.compile(r"^requirements[A-Za-z0-9._-]*\.(txt|lock)$")
+
+#: The sibling that actually installs. Both Dockerfiles and CI run
+#: `pip install -r requirements.lock` and pass no `-c`, so this is the file a
+#: pin has to appear in for the claim "this is installed" to hold.
+RUNTIME_LOCK = "requirements.lock"
+
+
+def normalize(name: str) -> str:
+    """PEP 503 normalisation, so one distribution has one name here."""
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def tracked_files() -> list[str]:
@@ -78,22 +107,30 @@ def constraint_pins(text: str, path: str) -> tuple[dict[str, str], list[str]]:
         if match is None:
             problems.append(f"{path}:{number}: not an exact sm-* pin: {line!r}")
         else:
-            pins[match.group(1)] = match.group(2)
+            pins[normalize(match.group(1))] = match.group(2)
     if not pins and not problems:
         problems.append(f"{path}: no sm-* pins found, so this file constrains nothing")
     return pins, problems
 
 
-def install_pins(text: str) -> dict[str, str]:
-    pins: dict[str, str] = {}
+def install_requirements(text: str) -> dict[str, tuple[str, str, str]]:
+    """Each requirement as ``name -> (operator, value, raw line)``.
+
+    Loose and direct-reference requirements are KEPT, with their operator, so a
+    caller can refuse them. A parser that returned only exact pins would make a
+    range indistinguishable from an absence.
+    """
+    found: dict[str, tuple[str, str, str]] = {}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         match = INSTALL_LINE.match(line)
-        if match is not None:
-            pins[match.group(1).lower()] = match.group(2)
-    return pins
+        if match is None:
+            continue
+        value = match.group("rest").split("#")[0].split(";")[0].strip()
+        found[normalize(match.group("name"))] = (match.group("op"), value, line)
+    return found
 
 
 def pairs(files: list[str]) -> dict[str, list[str]]:
@@ -123,20 +160,56 @@ def check(read: dict[str, str], files: list[str]) -> list[str]:
                 f"{constraints}: no requirements file beside it, so nothing installs what it pins"
             )
             continue
-        installed = {sibling: install_pins(read[sibling]) for sibling in siblings}
-        for name, version in sorted(pins.items()):
-            seen_anywhere = False
-            for sibling, pinned in installed.items():
-                actual = pinned.get(name)
-                if actual is None:
+
+        installed = {sibling: install_requirements(read[sibling]) for sibling in siblings}
+        directory = str(Path(constraints).parent)
+        runtime = f"{directory}/{RUNTIME_LOCK}" if directory != "." else RUNTIME_LOCK
+        authoritative = runtime if runtime in installed else None
+
+        # Exactness and completeness, judged from the install sources themselves
+        # rather than from the constraints file, so a package the record has
+        # never heard of is still examined.
+        for sibling, requirements in sorted(installed.items()):
+            for name, (operator, value, line) in sorted(requirements.items()):
+                if not name.startswith("sm-"):
                     continue
-                seen_anywhere = True
-                if actual != version:
+                if operator != "==":
+                    kind = "a direct reference" if operator == "@" else f"a {operator!r} range"
                     problems.append(
-                        f"{sibling}: pins {name}=={actual}, but {constraints} says "
+                        f"{sibling}: {name} is {kind} ({line!r}), not an exact pin — the "
+                        f"constraints file being exact buys nothing if the install is not"
+                    )
+                elif not re.fullmatch(r"\d+\.\d+\.\d+", value):
+                    problems.append(
+                        f"{sibling}: {name}=={value} is not a plain release version ({line!r})"
+                    )
+                if name not in pins:
+                    problems.append(
+                        f"{sibling}: pins {name}, which {constraints} does not mention — a "
+                        f"locked sm-* package with no constraints entry is never examined"
+                    )
+
+        for name, version in sorted(pins.items()):
+            seen_in: list[str] = []
+            for sibling, requirements in sorted(installed.items()):
+                requirement = requirements.get(name)
+                if requirement is None:
+                    continue
+                operator, value, _ = requirement
+                seen_in.append(sibling)
+                if operator == "==" and value != version:
+                    problems.append(
+                        f"{sibling}: pins {name}=={value}, but {constraints} says "
                         f"{version} — the install source wins, so one of them is a lie"
                     )
-            if not seen_anywhere:
+            if authoritative is not None:
+                if authoritative not in seen_in:
+                    problems.append(
+                        f"{authoritative}: does not install {name}, which {constraints} pins at "
+                        f"{version} — that lock is what the image and CI install, so a match in "
+                        f"another sibling does not make the package present"
+                    )
+            elif not seen_in:
                 problems.append(
                     f"{constraints}: pins {name}=={version}, which no install source beside it "
                     f"mentions ({', '.join(siblings)}) — nothing installs it"
@@ -200,10 +273,87 @@ def self_test() -> int:
             False,
         ),
         (
-            "MUST NOT match: a package whose name merely starts the same",
+            "MUST NOT match: a package whose name merely starts the same is a DIFFERENT "
+            "distribution, not a disagreement about sm-arp",
             {
-                "pkg/constraints.txt": "sm-arp==0.3.2\n",
+                "pkg/constraints.txt": "sm-arp==0.3.2\nsm-arp-extras==9.9.9\n",
                 "pkg/requirements.lock": "sm-arp==0.3.2\nsm-arp-extras==9.9.9\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock"],
+            False,
+        ),
+        # ── the rules review added ──────────────────────────────────────────
+        (
+            "exactness: a RANGE for an sm-* package in the lock, while another sibling "
+            "holds the matching exact pin — the shape that passed before",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": "sm-bridge>=0.4.1\n",
+                "pkg/requirements.txt": "sm-bridge==0.10.0\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock", "pkg/requirements.txt"],
+            True,
+        ),
+        (
+            "exactness: a direct artifact reference is a supply-chain decision, not a pin",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": "sm-bridge @ https://example.invalid/sm_bridge.whl\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock"],
+            True,
+        ),
+        (
+            "completeness: an sm-* package locked with no constraints entry is never examined",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": "sm-bridge==0.10.0\nsm-newcomer==1.0.0\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock"],
+            True,
+        ),
+        (
+            "presence: a non-runtime sibling must not mask absence from requirements.lock",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": "httpx==0.27.0\n",
+                "pkg/requirements.txt": "sm-bridge==0.10.0\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock", "pkg/requirements.txt"],
+            True,
+        ),
+        (
+            "MUST NOT match: PEP 503 — sm_bridge, SM-Bridge and sm-bridge are one distribution",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": "SM_Bridge==0.10.0\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock"],
+            False,
+        ),
+        (
+            "MUST NOT match: an extras-qualified exact pin is still an exact pin",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": "sm-bridge[feed]==0.10.0\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock"],
+            False,
+        ),
+        (
+            "agreement: an extras-qualified pin at the WRONG version is still caught",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": "sm-bridge[feed]==0.6.0\n",
+            },
+            ["pkg/constraints.txt", "pkg/requirements.lock"],
+            True,
+        ),
+        (
+            "MUST NOT match: an environment marker on an ordinary pin is not a version",
+            {
+                "pkg/constraints.txt": "sm-bridge==0.10.0\n",
+                "pkg/requirements.lock": 'sm-bridge==0.10.0 ; python_version >= "3.11"\n',
             },
             ["pkg/constraints.txt", "pkg/requirements.lock"],
             False,
@@ -220,7 +370,7 @@ def self_test() -> int:
     if failures:
         print(f"{failures} self-test case(s) failed — the gate is not measuring what it claims", file=sys.stderr)
         return 1
-    print(f"OK: self-test — {len(cases)} cases, both rules detect and the tolerated shapes stay quiet")
+    print(f"OK: self-test — {len(cases)} cases, every rule detects and the tolerated shapes stay quiet")
     return 0
 
 
@@ -229,7 +379,7 @@ def main() -> int:
     parser.add_argument(
         "--self-test",
         action="store_true",
-        help="prove the rules still detect, then exit",
+        help="prove every rule still detects, then exit",
     )
     args = parser.parse_args()
 
