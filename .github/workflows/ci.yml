@@ -329,39 +329,21 @@ jobs:
           # nothing.
           python scripts/audit_gate.py --self-test
 
-      - name: Constraints files stay exact and consistent
+      - name: Constraints files stay exact and consistent (self-test first, then gate)
         run: |
-          python3 - <<'EOF'
-          import re, sys
-
-          ok = True
-          pins: dict[str, dict[str, str]] = {}
-          for path in ("server/constraints.txt", "agent/constraints.txt"):
-              pins[path] = {}
-              for line in open(path):
-                  line = line.strip()
-                  if not line or line.startswith("#"):
-                      continue
-                  m = re.fullmatch(r"(sm-[a-z0-9-]+)==(\d+\.\d+\.\d+)", line)
-                  if not m:
-                      print(f"::error::{path}: not an exact sm-* pin: {line!r}")
-                      ok = False
-                  else:
-                      pins[path][m.group(1)] = m.group(2)
-              if not pins[path]:
-                  print(f"::error::{path}: no sm-* pins found")
-                  ok = False
-
-          # The exact pins in server/constraints.txt must appear verbatim in
-          # server/requirements.txt (the deploy image's install source).
-          req = open("server/requirements.txt").read()
-          for name, ver in pins.get("server/constraints.txt", {}).items():
-              if f"{name}=={ver}" not in req:
-                  print(f"::error::server/requirements.txt drifted from constraints: expected {name}=={ver}")
-                  ok = False
-
-          sys.exit(0 if ok else 1)
-          EOF
+          set -euo pipefail
+          # The comparison lives in a script now so that it can have a self-test,
+          # and because the inline version was wrong in a way its own name hid:
+          # it parsed BOTH constraints files, then cross-checked only the
+          # server's against server/requirements.txt and dropped the agent's
+          # pins. A four-release disagreement between agent/constraints.txt and
+          # agent/requirements.lock sat in the tree unseen underneath a step
+          # already called "stay exact and consistent". Same ordering as the
+          # gates above — the self-test runs first and gates the check, so a
+          # comparison that has stopped comparing fails here rather than
+          # reporting a clean tree.
+          python3 scripts/constraints_consistency_gate.py --self-test
+          python3 scripts/constraints_consistency_gate.py
 
   # ── Repository documentation guards ────────────────────────────────────────
   # LIGHT and always-on — never path-gated, and that is the point of it.
