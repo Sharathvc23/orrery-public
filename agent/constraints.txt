@@ -21,12 +21,32 @@ sm-aae==0.1.0
 sm-arp==0.3.2
 sm-authority==0.2.0
 #
-# sm-bridge 0.6.0 (from 0.4.1): maintenance, no security driver. 0.5.0's
-# delegated binding-write surface is consumed by nanda-connect, which Orrery does
-# not use; 0.6.0 adds an opt-in [feed] extra we deliberately do NOT take (see
-# below) and fixes sm_bridge.__version__, which was a hardcoded literal — a 0.5.0
-# install reports '0.4.1' (measured). Orrery never reads that attribute, so the
-# drift is upstream hygiene, not a correctness issue here.
+# sm-bridge 0.10.0 (from 0.6.0): CATCHING THIS FILE UP TO requirements.lock,
+# which has pinned 0.10.0 for some time. This line said 0.6.0 and the lock said
+# 0.10.0 — four releases apart, in the same directory, and nothing failed,
+# because the lock is what CI and the image install and this file installs
+# nothing. So the agent has been RUNNING 0.10.0 throughout; what was wrong was
+# the record of it. The CI step that should have caught the split read this file
+# and then compared only the server's pins, and is fixed in the same change
+# (scripts/constraints_consistency_gate.py).
+# The sentence this replaces said "maintenance, no security driver". That was
+# true when it was written and is not now: 0.7.0 is a SECURITY release. It
+# anchored /nanda/resolve, which had reduced an identifier scoped to a DIFFERENT
+# registry (@other:ns/foo, or a did:web under another host) to a bare id and
+# answered it locally, carrying THIS registry's proof block, with nothing telling
+# the caller the scope had been ignored. A comment that dates its own reasoning
+# is kept rather than deleted, because "no security driver" going stale silently
+# is the thing that happened.
+# Also in range: 0.8.0 made the delta log append-only and added conversion
+# `provenance`; 0.9.0 anchored the Index's urn:air: identifiers; 0.10.0 added an
+# `is_listed` hook to the gateway.
+# The agent is unaffected by all three of 0.9.0's breaking changes, verified on
+# the agent's own terms rather than inherited from server/constraints.txt: it
+# does not read the removed `synthesized` extension field (the only two matches
+# under agent/ are ordinary English in graduation/auto_approval.py), it does not
+# import create_gateway_router anywhere, and it passes a bare agent_id to
+# resolve rather than a URN, so the non-lower-case `URN:` now 400ing where it
+# used to 404 is unreachable from here.
 # The >=0.4.1 FLOOR in pyproject.toml is deliberately NOT raised: every symbol
 # Orrery imports exists in 0.4.1 with an identical shape (verified by
 # introspection across both wheels), so 0.4.1 remains the honest minimum API.
@@ -36,6 +56,6 @@ sm-authority==0.2.0
 # (_monotonic_base_seq) — deliberately gapped. A completeness-verifiable
 # feed over an intentionally gapped log would either false-alarm every restart or
 # claim a guarantee the store cannot honour.
-sm-bridge==0.6.0
+sm-bridge==0.10.0
 sm-conformance==0.3.2
 sm-parc==0.2.3
