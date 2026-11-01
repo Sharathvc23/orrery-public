@@ -2899,22 +2899,18 @@ def create_app(config: Config, agent=None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(err)) from err
         return {"registered": True}
 
-    # ─── sm-bridge: NANDA-compatible registry routers ─────────
-    # Mount /sm-bridge/{index,resolve,deltas,tools} so NANDA/NEST can read
-    # this agent's canonical AgentFacts. MUST be mounted before the SPA
-    # catch-all below or the /{full_path} route would shadow it.
-    try:
-        import os as _os
-
-        from . import DASHBOARD_PORT as _DEFAULT_PORT
-        from .sm_bridge_adapter import mount_sm_bridge_routers
-
-        _bridge_base = (
-            _os.environ.get("AGENT_PUBLIC_URL", "").strip().rstrip("/") or f"http://localhost:{_DEFAULT_PORT}"
-        )
-        mount_sm_bridge_routers(app, config=_config, public_url=_bridge_base)
-    except Exception as _e:
-        print(f"[sm_bridge] mount skipped: {_e}")
+    # ─── no sm-bridge registry routers here, deliberately ─────────
+    # /sm-bridge/{index,resolve,deltas,tools} used to be mounted at this point
+    # "so NANDA/NEST can read this agent's canonical AgentFacts". They never
+    # could, and not by accident: those paths are absent from
+    # local_auth.OPEN_ROUTES, and test_local_api_auth_guard's
+    # test_every_protected_route_refuses_an_unauthenticated_request asserts
+    # that every route off that list answers 401. The refusal was the tested,
+    # intended behaviour; the mount's claim about it was the wrong half. The
+    # document is public at GET /agentfacts.json, which IS on the allowlist.
+    # So a registry surface here needs an argument for OPENING it, and the
+    # allowlist entries would have to land WITH the mount — never after it,
+    # because the guard above would then be the thing that breaks.
 
     # Headless: the agent serves its signed local API (/api/local/*) + the NANDA
     # discovery surfaces. There is no bundled web SPA — render with a client of

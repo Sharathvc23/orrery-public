@@ -1,30 +1,40 @@
 """Sovereign agent ↔ sm-bridge adapter.
 
 Makes a single community-member agent projectnanda-compatible by emitting the
-**canonical NANDA AgentFacts** shape from ``sm-bridge`` (``SmAgentFacts``) and
-mounting sm-bridge's registry routers at ``/sm-bridge/*`` — mirroring the org
-server's ``server/sm_bridge_adapter.py``.
+**canonical NANDA AgentFacts** shape from ``sm-bridge`` (``SmAgentFacts``),
+served at ``GET /agentfacts.json``.
+
+This module used to also mount sm-bridge's registry routers at ``/sm-bridge/*``,
+mirroring the org server. That was removed because the repository held two
+opposite intentions about those routes and the stricter one was winning.
+
+The mount said it existed "so NANDA/NEST can read this agent's canonical
+AgentFacts". Meanwhile ``LocalAuthMiddleware`` is deny-by-default over an
+exact-path ``OPEN_ROUTES`` allowlist, ``/sm-bridge/*`` is not on it, and
+``test_every_protected_route_refuses_an_unauthenticated_request`` enumerates
+every route on the app and ASSERTS that each one not on the allowlist answers
+401. So the refusal was deliberate and guarded, not an omission — and the
+consumers the mount named hold no local token, so what they got was that 401.
+Measured on a live member agent before removing it.
+
+A mount whose stated purpose its own test suite forbids is the contradiction
+here, and deleting the surface resolves it in the direction the auth posture
+already chose. The document is in any case public at ``/agentfacts.json``,
+which IS on the allowlist, and that is the path the estate's reader uses. The
+org server keeps its own mount, where the routers are reachable and serve a
+registry of many members rather than of one.
 
 This replaces the agent's old bespoke ``nanda_models.NandaAgentFacts`` (which
 declared a made-up ``did:nanda:`` id and, wrongly, ``hmac-sha256`` auth even
 though the agent signs with Ed25519). sm-bridge is the upstream source of truth
 for the AgentFacts schema; we never fork it.
 
-Where the org's converter exposes a *registry of members*, the sovereign agent
-is a registry of exactly one agent — itself — so ``list_agents`` yields a single
-entry and ``get_agent`` resolves only this agent's id.
-
 Public API:
   build_self_agentfacts(config, base_url) -> SmAgentFacts | None
       The agent's own NANDA AgentFacts. Used by GET /agentfacts.json.
-  mount_sm_bridge_routers(app, *, config, public_url) -> converter | None
-      Wires /sm-bridge/index, /resolve, /deltas, /tools onto the app.
 """
 
 from __future__ import annotations
-
-from collections.abc import Iterator
-from typing import Any
 
 # sm-bridge imports live inside functions so this module imports even when
 # sm-bridge is absent (graceful no-op), matching the server adapter.
@@ -180,80 +190,4 @@ def build_self_agentfacts(
     )
 
 
-def make_self_converter(config, public_url: str):
-    """An ``AgentConverter`` whose registry is exactly this one agent.
-
-    Returns None if sm-bridge isn't installed.
-    """
-    try:
-        from sm_bridge import AbstractAgentConverter
-    except ImportError as e:
-        print(f"[sm_bridge_adapter] sm-bridge not installed, /sm-bridge routes disabled: {e}")
-        return None
-
-    def _gated() -> bool:
-        return not config.agent_id.startswith("TEST-")
-
-    class SelfConverter(AbstractAgentConverter):
-        def __init__(self) -> None:
-            super().__init__(
-                registry_id=config.agent_id,
-                provider_name=config.name or config.agent_id,
-                provider_url=public_url,
-                base_url=public_url,
-            )
-
-        def to_sm(self, agent: dict[str, Any]):
-            return build_self_agentfacts(config, public_url)
-
-        def list_agents(self, limit: int, offset: int) -> Iterator[dict[str, Any]]:
-            items = [{"agent_id": config.agent_id}] if _gated() else []
-            yield from items[offset : offset + limit]
-
-        def get_agent(self, agent_id_to_resolve: str) -> dict[str, Any] | None:
-            if not _gated():
-                return None
-            # The index advertises id=did:key… (or did:web), so resolve MUST
-            # round-trip that canonical id — not just the bare agent_id. Also
-            # accept the @handle. Otherwise a NANDA/NEST consumer that reads the
-            # index id and resolves by it gets a 404.
-            candidates = {config.agent_id, f"@{config.agent_id}", _agent_did(config, public_url)}
-            if agent_id_to_resolve in candidates:
-                return {"agent_id": config.agent_id}
-            return None
-
-        def is_public(self, agent: dict[str, Any]) -> bool:
-            return _gated()
-
-    return SelfConverter()
-
-
-def mount_sm_bridge_routers(app, *, config, public_url: str, prefix: str = "/sm-bridge"):
-    """Mount sm-bridge's NANDA registry routers (/index, /resolve, /deltas,
-    /tools) onto the agent app. Returns the converter, or None if sm-bridge
-    is missing (graceful no-op)."""
-    try:
-        from sm_bridge import DeltaStore, create_sm_router
-    except ImportError as e:
-        print(f"[sm_bridge_adapter] mount skipped, sm-bridge missing: {e}")
-        return None
-
-    converter = make_self_converter(config, public_url)
-    if converter is None:
-        return None
-
-    nanda_router, wellknown_router = create_sm_router(
-        converter=converter,
-        delta_store=DeltaStore(),
-        registry_id=config.agent_id,
-        base_url=public_url,
-        provider_name=config.name or config.agent_id,
-        provider_url=public_url,
-        prefix=prefix,
-    )
-    app.include_router(nanda_router)
-    app.include_router(wellknown_router)
-    return converter
-
-
-__all__ = ["build_self_agentfacts", "make_self_converter", "mount_sm_bridge_routers"]
+__all__ = ["build_self_agentfacts"]
