@@ -79,7 +79,7 @@ loses its exact (`==`) pins, or if `server/requirements.txt` drifts from
 | Package | Server pin | Agent pin | Source |
 |---|---|---|---|
 | `sm-arp` | `==0.3.2` | `==0.3.2` | PyPI |
-| `sm-bridge` | `==0.6.0` | `==0.6.0` | PyPI |
+| `sm-bridge` | `==0.10.0` | `==0.10.0` | PyPI |
 | `sm-authority` | — | `==0.2.0` | PyPI |
 | `sm-conformance` | `==0.3.2` | `==0.3.2` | PyPI |
 | `sm-parc` | — | `==0.2.3` | PyPI |
@@ -88,10 +88,22 @@ loses its exact (`==`) pins, or if `server/requirements.txt` drifts from
 | `sm-aae` | `==0.1.0` | `==0.1.0` | PyPI |
 | `sm-locp` | `==0.2.1` | — | PyPI |
 
-- `server/requirements.txt` + `server/constraints.txt` — the server install
-  (CI and `infra/Dockerfile.server` both pass `-c constraints.txt`).
-- `agent/pyproject.toml` (floors) + `agent/constraints.txt` (exact) — the agent
-  install (CI and `agent/infra/Dockerfile.agent` both pass `-c constraints.txt`).
+- `server/requirements.lock` — what the server install actually resolves. Both
+  CI and `infra/Dockerfile.server` run `pip install -r requirements.lock` and
+  pass **no** `-c`. `server/requirements.txt` and `server/constraints.txt` state
+  the intent beside it.
+- `agent/requirements.lock` — likewise for the agent: CI and
+  `agent/infra/Dockerfile.agent` both install from the lock alone.
+  `agent/pyproject.toml` holds the floors and `agent/constraints.txt` the exact
+  intent.
+
+  ⚠️ **The constraints files install nothing**, which this page previously had
+  backwards by saying both install paths pass `-c constraints.txt`. Neither does.
+  That matters because it is how a constraints file can go stale without any
+  build failing — `agent/constraints.txt` said `sm-bridge==0.6.0` while the lock
+  beside it said `0.10.0`, and the agent ran `0.10.0` the whole time. The two are
+  now cross-checked in CI by `scripts/constraints_consistency_gate.py`; the lock
+  is authoritative and the constraints file must agree with it.
 
 **The server/agent `sm-arp` split is CLOSED** (2026-07-08): sm-parc 0.2.3
 lifted its `sm-arp<0.3` cap (0.3.0's DAT bridge is opt-in and verified
