@@ -2902,12 +2902,15 @@ def create_app(config: Config, agent=None) -> FastAPI:
     # ─── no sm-bridge registry routers here, deliberately ─────────
     # /sm-bridge/{index,resolve,deltas,tools} used to be mounted at this point
     # "so NANDA/NEST can read this agent's canonical AgentFacts". They never
-    # could: LocalAuthMiddleware is deny-by-default over an exact-path
-    # OPEN_ROUTES allowlist, no /sm-bridge/* entry was ever added, and those
-    # consumers hold no local token — so each route answered 401. The document
-    # is already public at GET /agentfacts.json, which IS on the allowlist.
-    # If a registry surface is ever genuinely wanted here, the allowlist
-    # entries have to land WITH the mount, not after it.
+    # could, and not by accident: those paths are absent from
+    # local_auth.OPEN_ROUTES, and test_local_api_auth_guard's
+    # test_every_protected_route_refuses_an_unauthenticated_request asserts
+    # that every route off that list answers 401. The refusal was the tested,
+    # intended behaviour; the mount's claim about it was the wrong half. The
+    # document is public at GET /agentfacts.json, which IS on the allowlist.
+    # So a registry surface here needs an argument for OPENING it, and the
+    # allowlist entries would have to land WITH the mount — never after it,
+    # because the guard above would then be the thing that breaks.
 
     # Headless: the agent serves its signed local API (/api/local/*) + the NANDA
     # discovery surfaces. There is no bundled web SPA — render with a client of

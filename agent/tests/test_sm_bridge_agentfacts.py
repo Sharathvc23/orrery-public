@@ -5,9 +5,12 @@ AgentFacts is the upstream ``SmAgentFacts`` shape, not the old bespoke
 ``did:nanda``/``hmac`` document, and it is served at ``GET /agentfacts.json``.
 
 The ``/sm-bridge/{index,resolve}`` cases that used to live here went with the
-mount they exercised — ``LocalAuthMiddleware`` answered 401 on every one of
-those routes in a real deployment, so the tests passed against an app the
-middleware was not in front of while production served nothing.
+mount they exercised. They passed for a reason worth keeping on the record:
+``conftest.local_api_token`` is an autouse fixture that attaches a bearer token
+to every ``TestClient``, so those cases drove the routes as an AUTHENTICATED
+local caller. The middleware was in front of them the whole time — they simply
+never asked the question a NANDA/NEST consumer asks, which is what happens with
+no token. A test must opt out with ``@pytest.mark.no_local_token`` to ask it.
 """
 
 import base64

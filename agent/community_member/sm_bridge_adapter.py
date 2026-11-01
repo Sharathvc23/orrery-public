@@ -5,13 +5,24 @@ Makes a single community-member agent projectnanda-compatible by emitting the
 served at ``GET /agentfacts.json``.
 
 This module used to also mount sm-bridge's registry routers at ``/sm-bridge/*``,
-mirroring the org server. That was removed: ``LocalAuthMiddleware`` is
-deny-by-default over an exact-path ``OPEN_ROUTES`` allowlist and no
-``/sm-bridge/*`` entry was ever added, so every one of those routes answered 401
-to the NANDA/NEST consumers the mount existed to serve. The document it was
-meant to publish is already public at ``/agentfacts.json``, which IS on the
-allowlist. The org server still mounts the routers, where they are reachable and
-serve a registry of many members rather than of one.
+mirroring the org server. That was removed because the repository held two
+opposite intentions about those routes and the stricter one was winning.
+
+The mount said it existed "so NANDA/NEST can read this agent's canonical
+AgentFacts". Meanwhile ``LocalAuthMiddleware`` is deny-by-default over an
+exact-path ``OPEN_ROUTES`` allowlist, ``/sm-bridge/*`` is not on it, and
+``test_every_protected_route_refuses_an_unauthenticated_request`` enumerates
+every route on the app and ASSERTS that each one not on the allowlist answers
+401. So the refusal was deliberate and guarded, not an omission — and the
+consumers the mount named hold no local token, so what they got was that 401.
+Measured on a live member agent before removing it.
+
+A mount whose stated purpose its own test suite forbids is the contradiction
+here, and deleting the surface resolves it in the direction the auth posture
+already chose. The document is in any case public at ``/agentfacts.json``,
+which IS on the allowlist, and that is the path the estate's reader uses. The
+org server keeps its own mount, where the routers are reachable and serve a
+registry of many members rather than of one.
 
 This replaces the agent's old bespoke ``nanda_models.NandaAgentFacts`` (which
 declared a made-up ``did:nanda:`` id and, wrongly, ``hmac-sha256`` auth even
