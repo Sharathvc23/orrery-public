@@ -108,10 +108,10 @@ def test_HAPPY_a_disagreement_is_declared_not_silently_resolved(chapter_app, mon
     info = _build_info(chapter_app)
 
     assert info["provenance_conflict"] is True
-    assert info["platform_commit"] == "048f745"
+    assert info["platform_commit"] == "048f745584690272cc496bc7baa571c27eaccc77"
     # The stamp is still reported, so nothing that parsed `git_commit` breaks —
     # but it is no longer the only thing a reader sees.
-    assert info["git_commit"].startswith("e5e1a3e")
+    assert info["git_commit"] == "e5e1a3eca3c69ba35f3d7f67ca25f6ca921b4f3e"
 
 
 def test_EDGE_railway_up_with_no_platform_var_reports_no_conflict(chapter_app, monkeypatch):
@@ -123,4 +123,87 @@ def test_EDGE_railway_up_with_no_platform_var_reports_no_conflict(chapter_app, m
     info = _build_info(chapter_app)
 
     assert info["git_commit"] == "abc1234"
+    assert "provenance_conflict" not in info
+
+
+# ── …and it says so where monitors poll, not only in the resolver ────────
+#
+# The resolver computing the conflict is worthless if /health and /version
+# select only `git_commit` from it: a poller then sees the disputed stamp and
+# nothing else. These drive the endpoints themselves.
+
+STAMP = "e5e1a3eca3c69ba35f3d7f67ca25f6ca921b4f3e"
+PLATFORM = "048f745584690272cc496bc7baa571c27eaccc77"
+
+
+def _get_both(chapter_app):
+    chapter_app._BUILD_INFO_CACHE = None  # cached per process; resolve against this test's env
+    client = TestClient(chapter_app.app)
+    return client.get("/health").json(), client.get("/version").json()
+
+
+@pytest.mark.parametrize("endpoint", [0, 1], ids=["health", "version"])
+def test_HAPPY_both_endpoints_carry_the_conflict(chapter_app, monkeypatch, endpoint):
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", PLATFORM)
+    monkeypatch.setenv("APP_GIT_COMMIT", STAMP)
+
+    body = _get_both(chapter_app)[endpoint]
+
+    assert body["git_commit"] == STAMP
+    assert body["platform_commit"] == PLATFORM
+    assert body["provenance_conflict"] is True
+
+
+@pytest.mark.parametrize("endpoint", [0, 1], ids=["health", "version"])
+def test_HAPPY_both_endpoints_stay_quiet_when_the_two_agree(chapter_app, monkeypatch, endpoint):
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", PLATFORM)
+    monkeypatch.setenv("APP_GIT_COMMIT", PLATFORM[:7])
+
+    body = _get_both(chapter_app)[endpoint]
+
+    assert body["git_commit"] == PLATFORM[:7]
+    assert "platform_commit" not in body
+    assert "provenance_conflict" not in body
+
+
+def test_EDGE_full_hashes_sharing_seven_characters_still_conflict(chapter_app, monkeypatch):
+    # A 7-character prefix compare called these the same commit. Two full hashes
+    # are compared in full; only a SHORT stamp is matched as a prefix.
+    platform = "048f745584690272cc496bc7baa571c27eaccc77"
+    stamp = "048f745" + "0" * 33
+    assert platform[:7] == stamp[:7] and platform != stamp
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", platform)
+    monkeypatch.setenv("APP_GIT_COMMIT", stamp)
+
+    health, _ = _get_both(chapter_app)
+
+    assert health["provenance_conflict"] is True
+    assert health["git_commit"] == stamp
+    assert health["platform_commit"] == platform
+
+
+def test_EDGE_the_conflict_advice_names_the_source_that_supplied_the_stamp(chapter_app, monkeypatch, capsys):
+    # With APP_GIT_COMMIT unset the stamp came from GIT_COMMIT; telling the
+    # operator to clear APP_GIT_COMMIT would resolve nothing.
+    monkeypatch.delenv("APP_GIT_COMMIT", raising=False)
+    monkeypatch.setenv("GIT_COMMIT", STAMP)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", PLATFORM)
+
+    info = _build_info(chapter_app)
+
+    assert info["provenance_conflict"] is True
+    line = next(ln for ln in capsys.readouterr().out.splitlines() if "[build-info] CONFLICT" in ln)
+    assert "(from GIT_COMMIT)" in line
+    assert "APP_GIT_COMMIT" not in line
+
+
+def test_EDGE_an_unknown_placeholder_is_not_a_conflict(chapter_app, monkeypatch):
+    # The image bakes GIT_COMMIT=unknown when nothing stamped it. That is an
+    # absent stamp, not one that disagrees with the platform.
+    monkeypatch.delenv("APP_GIT_COMMIT", raising=False)
+    monkeypatch.setenv("GIT_COMMIT", "unknown")
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", PLATFORM)
+
+    info = _build_info(chapter_app)
+
     assert "provenance_conflict" not in info

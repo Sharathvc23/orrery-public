@@ -8998,6 +8998,9 @@ def _resolve_build_info() -> dict[str, str | bool]:
 
     # 1. deploy-time-injected (freshest; the railway-up fix)
     commit = _env("APP_GIT_COMMIT")
+    # Which rung supplied `commit` — the conflict log has to name it, because
+    # clearing a source that did not supply the stamp resolves nothing.
+    commit_source = "APP_GIT_COMMIT" if commit else ""
     branch = _env("APP_GIT_BRANCH")
     build_ts = _env("APP_BUILD_TIMESTAMP")
 
@@ -9011,12 +9014,16 @@ def _resolve_build_info() -> dict[str, str | bool]:
                 # Honest degradation, LOUD — not a silent swallow into a stale value.
                 print(f"[build-info] _version.json present but unreadable ({e!r}); degrading to the next source")
                 data = {}
-            commit = commit or str(data.get("git_commit", "")).strip()
+            if not commit:
+                commit = str(data.get("git_commit", "")).strip()
+                commit_source = "_version.json" if commit else ""
             branch = branch or str(data.get("git_branch", "")).strip()
             build_ts = build_ts or str(data.get("build_timestamp", "")).strip()
 
     # 3. docker --build-arg env
-    commit = commit or _env("GIT_COMMIT")
+    if not commit:
+        commit = _env("GIT_COMMIT")
+        commit_source = "GIT_COMMIT" if commit else ""
     branch = branch or _env("GIT_BRANCH")
     build_ts = build_ts or _env("BUILD_TIMESTAMP")
 
@@ -9042,7 +9049,13 @@ def _resolve_build_info() -> dict[str, str | bool]:
     # field that might describe either deploy is worse than one that admits it
     # cannot tell, because the whole point of this chain is catching a stale
     # deploy. `stale-deploy guard broken` is the failure it exists to surface.
-    provenance_conflict = bool(rw_sha and commit and not rw_sha.startswith(commit[:7]))
+    #
+    # Compared over the SHORTER of the two lengths, not a fixed 7: both forms are
+    # real (railway_deploy.sh stamps the full `rev-parse HEAD`, CI and compose the
+    # short one), and two distinct full hashes can share their first 7 characters.
+    # Only the conflict check skips the image's "unknown" placeholder — an absent
+    # stamp disagrees with nothing.
+    provenance_conflict = bool(rw_sha and commit_source and commit != "unknown" and not _same_commit(commit, rw_sha))
 
     # 5. LOCAL DEV ONLY — a real checkout, so `/health` is accurate without wiring
     if not commit:
@@ -9060,15 +9073,45 @@ def _resolve_build_info() -> dict[str, str | bool]:
         # Both named, neither asserted as THE commit. An operator polling /health
         # for a stale deploy needs to see that the two deploy paths disagree —
         # that IS the stale-deploy signal, one rung earlier than they expected it.
-        _BUILD_INFO_CACHE["platform_commit"] = rw_sha[:7]
+        # Full hashes, not [:7] — two commits that only differ after the 7th
+        # character would otherwise print as the same value and call it a conflict.
+        _BUILD_INFO_CACHE["platform_commit"] = rw_sha
         _BUILD_INFO_CACHE["provenance_conflict"] = True
         print(
-            f"[build-info] CONFLICT: stamped commit {commit[:7]} disagrees with the "
-            f"platform's {rw_sha[:7]}. One of a `railway up` upload and a github "
-            f"build is not what is running; /health cannot tell which. Clear the "
-            f"stale APP_GIT_COMMIT service variable to resolve it."
+            f"[build-info] CONFLICT: stamped commit {commit} (from {commit_source}) "
+            f"disagrees with the platform's {rw_sha}. One of a `railway up` upload "
+            f"and a github build is not what is running; /health cannot tell which. "
+            f"{_STALE_STAMP_ADVICE[commit_source]}"
         )
     return _BUILD_INFO_CACHE
+
+
+# What resolves a conflict depends on which rung supplied the stamp.
+_STALE_STAMP_ADVICE = {
+    "APP_GIT_COMMIT": "Clear the stale APP_GIT_COMMIT service variable to resolve it.",
+    "_version.json": "The _version.json baked into the upload is stale; redeploy without it to resolve it.",
+    "GIT_COMMIT": (
+        "GIT_COMMIT (a --build-arg baked into the image, or a runtime variable) "
+        "is stale; rebuild without the explicit value or clear the variable to resolve it."
+    ),
+}
+
+
+def _same_commit(a: str, b: str) -> bool:
+    """Two commit ids name the same commit — compared over the shorter of the
+    two, so a short stamp still matches its full hash, while two full hashes
+    must match in full."""
+    a, b = a.lower(), b.lower()
+    n = min(len(a), len(b))
+    return a[:n] == b[:n]
+
+
+def _provenance_conflict_fields() -> dict[str, str | bool]:
+    """The conflict keys of the resolved build info — present only when the two
+    deploy paths disagree. /version and /health both spread this, so a monitor
+    polling either one sees the disagreement, not just the disputed stamp."""
+    info = _resolve_build_info()
+    return {k: info[k] for k in ("platform_commit", "provenance_conflict") if k in info}
 
 
 @app.get("/version")
@@ -9103,6 +9146,7 @@ async def version() -> dict:
         "git_commit": info["git_commit"],
         "git_branch": info["git_branch"],
         "build_timestamp": info["build_timestamp"],
+        **_provenance_conflict_fields(),
         "protocol_version": "0.3",
         "arp_version": "0.1",
     }
@@ -9199,6 +9243,9 @@ async def health() -> dict:
         # here so smoke-tests/orchestrators that poll /health can detect a
         # stale deploy. "unknown" in local dev when nothing was baked.
         "git_commit": _resolve_build_info()["git_commit"],
+        # When the stamp and the platform disagree, the disputed stamp alone
+        # would read as a clean answer — carry the disagreement with it.
+        **_provenance_conflict_fields(),
         "members": len(members),
         "federation": len(federation),
         "federation_state": federation_state,
