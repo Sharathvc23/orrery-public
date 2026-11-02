@@ -9,6 +9,9 @@ venv/
 .ruff_cache/
 build/
 dist/
+# Baked by agent/infra/bake_build_info.py inside the image build. A committed
+# copy would be read as the build identity of every later checkout.
+agent/community_member/_build_info.json
 
 # Node
 node_modules/

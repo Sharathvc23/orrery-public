@@ -81,8 +81,15 @@ OPEN_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("GET", "/.well-known/reputation.json"): "Published reputation credential, verifiable by its signature.",
     ("GET", "/agentfacts.json"): "AgentFacts document the Index and peers resolve.",
-    # ── Liveness.
-    ("GET", "/api/health"): "Liveness probe. Reports no agent state; the Compose healthcheck calls it.",
+    # ── Liveness and build identity.
+    ("GET", "/api/health"): (
+        "The org's /health, proxied and labelled as the org's. Reports no agent state; the e2e "
+        "harness waits on it. (The image's own healthcheck uses /agentfacts.json.)"
+    ),
+    ("GET", "/version"): (
+        "This agent's build commit, baked into the image. An operator verifying a deploy holds no "
+        "local token; it discloses only the commit, branch and build time of public source."
+    ),
     # ── Protocol and platform surfaces whose callers hold no local token.
     ("POST", "/"): (
         "A2A JSON-RPC endpoint. The caller is a peer agent, which has no local token, so a "
