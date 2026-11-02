@@ -118,6 +118,8 @@ files = [
     # wrong-shaped verdict here is the difference between refusing a listing
     # and publishing an unauthorised one.
     "community_member/owner.py",
+    # The agent's own build identity, served at /version.
+    "community_member/build_info.py",
 ]
 
 [build-system]

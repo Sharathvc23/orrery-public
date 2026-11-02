@@ -211,6 +211,12 @@ services:
     build:
       context: agent
       dockerfile: infra/Dockerfile.agent
+      # Baked into the image's build-info file and served at the agent's
+      # /version — the same stamp the server gets above, never a runtime env.
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-unknown}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:-unknown}
     depends_on:
       server:
         condition: service_healthy

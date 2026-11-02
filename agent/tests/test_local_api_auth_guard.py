@@ -109,6 +109,11 @@ EXPECTED_OPEN = {
     ("GET", "/.well-known/reputation.json"),
     ("GET", "/agentfacts.json"),
     ("GET", "/api/health"),
+    # Reviewed when the agent got its own build identity. It discloses the
+    # commit, branch and build time the image was baked with — of a public
+    # repo — plus the agent id and package version AgentFacts already publish.
+    # No config, no state, no secrets.
+    ("GET", "/version"),
     ("POST", "/"),
     ("POST", "/webhooks/platform/{platform}/uninstall"),
 }

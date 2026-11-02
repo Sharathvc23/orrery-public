@@ -40,7 +40,14 @@ PINNED_TO_PROCESS_GLOBAL = {
 # even when it is set after this package is first imported.
 RESOLVED_ON_USE = {"TASK_STORE_PATH", "SETTINGS_CACHE"}
 # Package data shipped with the code; correctly bound to the install location.
-PACKAGE_DATA = {"SCHEMA_ROOT", "BUILTIN_SKILLS_DIR", "PACKS_DIR"}
+PACKAGE_DATA = {
+    "SCHEMA_ROOT",
+    "BUILTIN_SKILLS_DIR",
+    "PACKS_DIR",
+    # build_info.py — baked into the package by the image build; it describes
+    # the installed code, so it must NOT follow an agent home.
+    "BUILD_INFO_FILE",
+}
 # Matched by the detector but not filesystem locations. Recorded so the next
 # reader does not re-investigate them.
 NOT_A_LOCATION = {

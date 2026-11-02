@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from community_member import llm_client
 from community_member import llm_runtime as _llm_runtime
 
-from . import DASHBOARD_PORT, local_auth
+from . import DASHBOARD_PORT, build_info, local_auth
 from .a2a_client import A2AClient
 from .config import Config
 
@@ -1164,12 +1164,40 @@ def create_app(config: Config, agent=None) -> FastAPI:
             "summary": plan.summary or ("Queued: " + ", ".join(bits) if bits else "Nothing to do."),
         }
 
+    @app.get("/version")
+    async def version():
+        """This agent's OWN build — the commit its image was baked with.
+
+        Open, like the org's ``/version``: an operator verifying a deploy holds
+        no local token. Same field names as the org's, so one probe reads both.
+        """
+        return {
+            "service": "agent",
+            "agent_id": _config.agent_id,
+            **build_info.read_build_info(),
+            "package_version": __import__("community_member").__version__,
+        }
+
     @app.get("/api/health")
     async def proxy_health():
+        """The ORG's ``/health``, proxied — not this agent's.
+
+        Its payload used to be returned as-is, so its ``git_commit`` read as
+        this agent's build while naming the org server's. It now sits under
+        ``org``, labelled, with nothing about a build at the top level; the
+        agent's own build is ``/version``.
+        """
+        labelled = {
+            "payload": "org",
+            "about": "The org's /health, proxied. org.git_commit is the ORG server's build; this agent's is /version.",
+            "agent_build": "/version",
+        }
         try:
-            return _client.health()
+            org = _client.health()
         except Exception as e:
-            return {"status": "chapter_unreachable", "error": str(e)}
+            return {"status": "chapter_unreachable", **labelled, "error": str(e)}
+        status = org.get("status", "unknown") if isinstance(org, dict) else "unknown"
+        return {"status": status, **labelled, "org": org}
 
     # ─── NANDA AgentFacts (protocol compliance) ────────────────
 
