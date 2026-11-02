@@ -562,6 +562,7 @@ Compose `.env`.
 | `RAILWAY_PUBLIC_DOMAIN` | — (platform-set) | Platform-injected public domain; when set, `resolve_public_url()` returns `https://<domain>`. Falls back to `PUBLIC_URL`. |
 | `MAX_MEMBERS` | `40` | Cap on the number of agents that can join the org. |
 | `ORG_HOST39_CARD_BASE` | — (empty) | Base URL of externally (host39-)hosted member A2A cards. **Unset = self-serve member cards:** a member that sent its public URL on join resolves to `{endpoint}/.well-known/agent.json` — its own served card; pure self-hosters need no host39 dependency. **Set is necessary but NOT sufficient:** the catalog advertises a member's host39 card only once that member carries a publication record — see *The card base alone does not publish* below. |
+| `ORG_PUBLIC_MEMBER_CATALOG` | `false` | Whether a caller with **no verified identity** sees this org's member entries in `/.well-known/ai-catalog.json` and `GET /agents/search`. The NANDA Index is such a caller. Only `1`/`true`/`yes`/`on` turns it on; unset, empty or a typo leaves it off. **Off = the Index can find this org as ONE agent, not as its roster** — no error, no log line, the members are simply never candidates. **On is necessary but NOT sufficient:** a member is listed only once it has a resolvable card (*The card base alone does not publish*), and only for a query the Index ranks the org in for at all (*What the Index can see of this org*, below). Stock Compose does not forward it. |
 | `METRICS_BEARER_TOKEN` | — (empty) | Bearer token that gates `/metrics`. |
 | `MEMBER_PERSIST_OUTBOX_PATH` | `member_persist_outbox.jsonl` | Durable outbox for member rows whose Postgres write failed after retries — replayed at boot so a member is never silently lost. Point it at a path on a **durable volume** in production (a fresh container filesystem is ephemeral). Watch `nanda_chapter_db_failures_total` + `nanda_chapter_member_persist_failures_total` for non-zero. |
 | `FEDERATION_AUTODISCOVER` | `false` | Enable cross-org peer discovery + sync. Opt-in. |
@@ -630,6 +631,91 @@ card and no http(s) endpoint`, and the catalog itself reports the count as
 `omittedMembers`. That count is **not** a consent signal: members withheld from an
 unauthenticated caller are counted separately as `withheldMembers`. A catalog that
 advertises nothing but the org's own root card fails `scripts/catalog_canary.py`.
+
+### What the Index can see of this org
+
+The NANDA Index holds **one record per org**: its catalog root,
+`urn:air:<ORG_DOMAIN>:catalog:root`, of type `application/ai-catalog+json`, whose `url` is
+this org's public base URL. Member agents are **not** records on the Index.
+`GET /api/v1/search` never returns one, and resolving a member's URN returns the org's
+catalog root (`"match": "publisher"`), not the member.
+
+So a consumer reaches a member in two hops: resolve the catalog root to the org, then read
+the org's `/.well-known/ai-catalog.json`. Each entry there carries a member's card URL,
+next to the `withheldMembers` and `omittedMembers` counts. `GET /agents/<identifier>`
+resolves one member by id.
+
+`GET /api/v1/agentic-search` is the one Index surface that returns members, and it builds
+them **live, per query**. It ranks orgs on their stored records, then fans out
+`GET {registry_url}/agents/search?q=…` to each ranked org. The entries it gets back become
+candidates with `"provenance": {"basis": "agent_search"}`. A member of this org is a
+candidate only if **all** of these hold:
+
+1. **The Index ranks the org for the query**, on its *stored copy* of the org's
+   `description` and `tags`. Member names and skills play no part in this step. Measured
+   2026-11-01: `q="peer review"` and `q="community workshops school partnerships"`, both
+   skills of live members, ranked astrocity out, so its members were never asked for. Its
+   stored tags were still the June default, `["general ai"]`. The copy is refreshed only by
+   `POST /admin/api/index-v2/resync` (admin-auth); re-running register gets a 409 and
+   changes nothing.
+2. **The org answers.** Any non-2xx, timeout or malformed body puts the org in
+   `orgsUnreachable` and drops all of it, root included.
+3. **An anonymous caller may see members.** That is `ORG_PUBLIC_MEMBER_CATALOG`. The
+   fan-out is unauthenticated, and there is deliberately no bypass.
+4. **The member has a resolvable card**, or it is in `omittedMembers`. See *The card base
+   alone does not publish*.
+5. **Its name or skills match the query terms.** A member entry's `description` is always
+   empty, so prose never matches. Each org contributes at most 10 entries.
+
+| What the Index sees | `ORG_PUBLIC_MEMBER_CATALOG` off (default) | on |
+|---|---|---|
+| Catalog root, `/api/v1/search`, `/api/v1/resolve` | listed | listed |
+| `agentic-search` candidates from this org | at most the org's own entry | the org's entry plus each matching member |
+| Anonymous `/.well-known/ai-catalog.json` | the org's entry; every member counted in `withheldMembers` | the org's entry plus each member with a resolvable card; `withheldMembers: 0` |
+
+A caller with a verified signature sees members either way. Only anonymous callers,
+including the Index, are affected.
+
+**Check it.** Every URL here is public and needs no credentials; the filtering needs `jq`.
+Run the first two commands with the same query: one shows what the Index saw, the other
+shows what this org gave it.
+
+```bash
+ORG=https://org.example.org      # this org's PUBLIC_URL
+ORG_ID=example-org               # the org id at the Index (INDEX_ORG_ID)
+DOMAIN=example.org               # ORG_DOMAIN
+Q="words a user would search for"
+
+# 1. The Index: did this org's agents come back, and was the org dropped?
+curl -s -G https://api.nandaindex.org/api/v1/agentic-search --data-urlencode "q=$Q" \
+  | jq --arg org "$ORG_ID" '{orgsUnreachable,
+      ours: [.candidates[] | select(.provenance.orgId == $org) | .identifier]}'
+
+# 2. This org, asked the same question the way the Index asks it (anonymously)
+curl -s -G "$ORG/agents/search" --data-urlencode "q=$Q" \
+  | jq '{withheldMembers, omittedMembers, entries: [.entries[].identifier]}'
+
+# 3. The record the Index ranks on, and the catalog a consumer reads next
+curl -s -G https://api.nandaindex.org/api/v1/resolve \
+  --data-urlencode "locator=urn:air:$DOMAIN:catalog:root" | jq '.entry | {url, tags, description}'
+curl -s "$ORG/.well-known/ai-catalog.json" \
+  | jq '{withheldMembers, omittedMembers, entries: [.entries[] | {identifier, url}]}'
+```
+
+| You see | It means |
+|---|---|
+| `$ORG_ID` in `orgsUnreachable` | The Index asked and was dropped. Step 2 shows what it got back. |
+| `ours` is only the org's own entry, and step 2 has `withheldMembers` > 0 | `ORG_PUBLIC_MEMBER_CATALOG` is off. This is the default doing its job, not a fault. |
+| `ours` is empty, the org is not unreachable, and step 2 has matching entries | The Index did not rank this org for `$Q`. Compare step 3's `tags` with what the org serves, and resync. |
+| `ours` is empty and step 2 has `entries: []` | Nothing in this org matches `$Q`. |
+| A member is missing, and `omittedMembers` > 0 | It has no resolvable card. See *The card base alone does not publish*. |
+
+The member gate's default is the security decision. It was closed after an audit found an
+email address and a phone number in a member's free-text description, reachable by an
+unauthenticated GET. Opting in now publishes each member's identifier, name, skills and
+card URL, which is what the registration notice already tells every member is public.
+That is an org-level choice between being discoverable and being private; nothing in the
+code makes it for you.
 
 ## Production profile
 
