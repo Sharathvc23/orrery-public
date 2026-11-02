@@ -15,11 +15,11 @@ correct about a service you did not ask about is worse than no stamp at all.
 **`GET /version` (open, no local token)** now reports the agent's own
 `git_commit`, `git_branch` and `build_timestamp`. These are the same field names
 as the org server's `/version`, so one probe reads both. When the build's two
-commit sources disagree, it also reports the org's `platform_commit` /
-`provenance_conflict` pair.
+commit sources disagree, it also reports a `platform_commit` /
+`provenance_conflict` pair, named as the org names its own.
 
-**The commit is baked at build time**, by the same mechanism as the org image
-(#47): `ARG GIT_COMMIT=${RAILWAY_GIT_COMMIT_SHA:-unknown}`, so a
+**The commit is baked at build time**, by the same mechanism as the org image:
+`ARG GIT_COMMIT=${RAILWAY_GIT_COMMIT_SHA:-unknown}`, so a
 github-connected Railway build bakes the builder's commit and an explicit
 `--build-arg` still wins. The difference is the sink. The value goes into a file
 inside the package, `community_member/_build_info.json`, and never into an
